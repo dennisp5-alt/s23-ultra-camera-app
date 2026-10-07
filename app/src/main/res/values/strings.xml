@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">s23-ultra-camera-app</string>
+    <string name="app_name">S23 Ultra Camera</string>
     <string name="capture_button">Capture</string>
-    <string name="switch_camera_button">Switch Camera</string>
+    <string name="switch_camera_button">Switch</string>
+    <string name="flash_button">Flash Off</string>
+    <string name="zoom_label">1.0x</string>
+    <string name="camera_ready">Camera ready</string>
 </resources>

@@ -1,25 +1,29 @@
 # s23-ultra-camera-app
 
-A basic Android camera app built with CameraX for the Samsung Galaxy S23 Ultra.
+A premium-style Android camera app for the Samsung Galaxy S23 Ultra built with CameraX.
 
-Features:
+Features included:
 - Live camera preview
 - Photo capture
 - Front/back camera switching
-- Saves captured images to the device's Pictures folder
-- Target Android 15 (API 35)
+- Flash toggle support for compatible devices
+- Zoom control
+- Captured image preview thumbnail
+- Saves images to the device's Pictures folder
+- Android 15 / API 35 target
 
-## Project details
-- App package: `com.dennis.s23camera`
-- App name: `s23-ultra-camera-app`
+## Tech stack
+- Kotlin
+- CameraX
+- AndroidX AppCompat + Material 3
+- Android Studio / Gradle
 
-## Get started
+## Run it
 1. Open this folder in Android Studio.
-2. Let Gradle sync.
-3. Connect a Samsung Galaxy S23 Ultra or a compatible Android 15 device/emulator.
-4. Run the app from Android Studio.
+2. Let Gradle sync finish.
+3. Connect a Samsung S23 Ultra or Android 15+ emulator.
+4. Run the app.
 
-## Notes
-- This project uses CameraX and AndroidX libraries.
-- It requests the `CAMERA` permission at runtime.
-- Captured images are saved under `Pictures/S23UltraCameraApp`.
+## Output location
+Captured images are saved under:
+- `Pictures/S23UltraCameraApp`
