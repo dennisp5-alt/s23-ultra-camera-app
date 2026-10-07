@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">s23-ultra-camera-app</string>
+    <string name="capture_button">Capture</string>
+    <string name="switch_camera_button">Switch Camera</string>
+</resources>
