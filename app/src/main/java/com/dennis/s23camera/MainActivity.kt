@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import android.widget.SeekBar
@@ -32,10 +34,14 @@ class MainActivity : AppCompatActivity() {
     private var imageCapture: ImageCapture? = null
     private var camera: Camera? = null
     private var lensFacing = CameraSelector.LENS_FACING_BACK
-    private var flashEnabled = false
+    private var flashMode = ImageCapture.FLASH_MODE_OFF
+    private var timerSeconds = 0
+    private var gridEnabled = false
+    private var currentMode = "Photo"
     private var currentZoomRatio = 1f
 
     private lateinit var cameraExecutor: ExecutorService
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private val requestCameraPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -43,7 +49,7 @@ class MainActivity : AppCompatActivity() {
         if (isGranted) {
             startCamera()
         } else {
-            Toast.makeText(this, "Camera permission is required.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Camera permission is required to use this app.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -54,9 +60,15 @@ class MainActivity : AppCompatActivity() {
 
         cameraExecutor = Executors.newSingleThreadExecutor()
 
-        binding.captureButton.setOnClickListener { takePhoto() }
+        binding.captureButton.setOnClickListener { captureWithTimer() }
         binding.switchCameraButton.setOnClickListener { switchCamera() }
         binding.flashButton.setOnClickListener { toggleFlash() }
+        binding.timerButton.setOnClickListener { toggleTimer() }
+        binding.gridButton.setOnClickListener { toggleGrid() }
+        binding.modePhotoButton.setOnClickListener { setMode("Photo") }
+        binding.modePortraitButton.setOnClickListener { setMode("Portrait") }
+        binding.modeNightButton.setOnClickListener { setMode("Night") }
+        binding.modeButton.setOnClickListener { cycleMode() }
 
         binding.zoomSlider.max = 20
         binding.zoomSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -77,6 +89,8 @@ class MainActivity : AppCompatActivity() {
         } else {
             requestCameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
+
+        updateUi()
     }
 
     private fun startCamera() {
@@ -91,7 +105,7 @@ class MainActivity : AppCompatActivity() {
 
             imageCapture = ImageCapture.Builder()
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-                .setFlashMode(if (flashEnabled) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF)
+                .setFlashMode(flashMode)
                 .build()
 
             val cameraSelector = CameraSelector.Builder()
@@ -101,7 +115,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 cameraProvider.unbindAll()
                 camera = cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageCapture)
-                updateCameraUi()
+                updateUi()
                 camera?.cameraInfo?.zoomState?.observe(this) { state ->
                     val ratio = state?.zoomRatio ?: 1f
                     currentZoomRatio = ratio
@@ -110,19 +124,9 @@ class MainActivity : AppCompatActivity() {
                 }
             } catch (exc: Exception) {
                 Log.e("MainActivity", "Camera binding failed", exc)
-                Toast.makeText(this, "Unable to start the camera.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Unable to start camera preview.", Toast.LENGTH_SHORT).show()
             }
         }, ContextCompat.getMainExecutor(this))
-    }
-
-    private fun updateCameraUi() {
-        val hasFlash = camera?.cameraInfo?.hasFlashUnit() == true
-        binding.flashButton.isEnabled = hasFlash
-        binding.flashButton.alpha = if (hasFlash) 1f else 0.4f
-        binding.flashButton.text = if (flashEnabled && hasFlash) "Flash On" else "Flash Off"
-        binding.switchCameraButton.text = if (lensFacing == CameraSelector.LENS_FACING_BACK) "Back" else "Front"
-        binding.zoomSlider.progress = (currentZoomRatio - 1f).toInt().coerceIn(0, 20)
-        binding.zoomLabel.text = String.format(Locale.US, "%.1fx", currentZoomRatio)
     }
 
     private fun switchCamera() {
@@ -131,20 +135,79 @@ class MainActivity : AppCompatActivity() {
         } else {
             CameraSelector.LENS_FACING_BACK
         }
-
         currentZoomRatio = 1f
         startCamera()
     }
 
     private fun toggleFlash() {
-        if (camera?.cameraInfo?.hasFlashUnit() != true) {
-            Toast.makeText(this, "This camera does not support flash.", Toast.LENGTH_SHORT).show()
-            return
+        flashMode = when (flashMode) {
+            ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_AUTO
+            ImageCapture.FLASH_MODE_AUTO -> ImageCapture.FLASH_MODE_ON
+            else -> ImageCapture.FLASH_MODE_OFF
         }
+        imageCapture?.flashMode = flashMode
+        updateUi()
+    }
 
-        flashEnabled = !flashEnabled
-        imageCapture?.flashMode = if (flashEnabled) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
-        binding.flashButton.text = if (flashEnabled) "Flash On" else "Flash Off"
+    private fun toggleTimer() {
+        timerSeconds = when (timerSeconds) {
+            0 -> 3
+            3 -> 5
+            else -> 0
+        }
+        updateUi()
+    }
+
+    private fun toggleGrid() {
+        gridEnabled = !gridEnabled
+        binding.gridOverlay.alpha = if (gridEnabled) 1f else 0f
+        updateUi()
+    }
+
+    private fun setMode(mode: String) {
+        currentMode = mode
+        binding.modeButton.text = mode
+        binding.modePhotoButton.setBackgroundColor(if (mode == "Photo") 0xFF1C1C1F.toInt() else 0x00000000)
+        binding.modePortraitButton.setBackgroundColor(if (mode == "Portrait") 0xFF1C1C1F.toInt() else 0x00000000)
+        binding.modeNightButton.setBackgroundColor(if (mode == "Night") 0xFF1C1C1F.toInt() else 0x00000000)
+        binding.modePhotoButton.setTextColor(if (mode == "Photo") 0xFFFFFFFF.toInt() else 0xFFD9D9D9.toInt())
+        binding.modePortraitButton.setTextColor(if (mode == "Portrait") 0xFFFFFFFF.toInt() else 0xFFD9D9D9.toInt())
+        binding.modeNightButton.setTextColor(if (mode == "Night") 0xFFFFFFFF.toInt() else 0xFFD9D9D9.toInt())
+        updateUi()
+    }
+
+    private fun cycleMode() {
+        val modes = listOf("Photo", "Portrait", "Night")
+        val index = (modes.indexOf(currentMode) + 1) % modes.size
+        setMode(modes[index])
+    }
+
+    private fun updateUi() {
+        binding.flashButton.text = when (flashMode) {
+            ImageCapture.FLASH_MODE_AUTO -> "Flash Auto"
+            ImageCapture.FLASH_MODE_ON -> "Flash On"
+            else -> "Flash Off"
+        }
+        binding.timerButton.text = if (timerSeconds == 0) "Timer Off" else "Timer ${timerSeconds}s"
+        binding.gridButton.text = if (gridEnabled) "Grid On" else "Grid Off"
+        binding.zoomLabel.text = String.format(Locale.US, "%.1fx", currentZoomRatio)
+        binding.statusText.text = when (lensFacing) {
+            CameraSelector.LENS_FACING_FRONT -> "Front camera • $currentMode"
+            else -> "Rear camera • $currentMode"
+        }
+        binding.gridOverlay.alpha = if (gridEnabled) 1f else 0f
+        binding.modeButton.text = currentMode
+        binding.switchCameraButton.text = if (lensFacing == CameraSelector.LENS_FACING_BACK) "Back" else "Front"
+    }
+
+    private fun captureWithTimer() {
+        val delayMs = timerSeconds * 1000L
+        if (delayMs > 0L) {
+            binding.statusText.text = "Capturing in ${timerSeconds}s"
+            mainHandler.postDelayed({ takePhoto() }, delayMs)
+        } else {
+            takePhoto()
+        }
     }
 
     private fun takePhoto() {
@@ -186,6 +249,7 @@ class MainActivity : AppCompatActivity() {
 
                     runOnUiThread {
                         Toast.makeText(this@MainActivity, "Photo saved to gallery.", Toast.LENGTH_SHORT).show()
+                        updateUi()
                     }
                 }
 
@@ -214,6 +278,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        mainHandler.removeCallbacksAndMessages(null)
         cameraExecutor.shutdown()
     }
 }
