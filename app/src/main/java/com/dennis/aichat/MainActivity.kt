@@ -88,9 +88,9 @@ class MainActivity : Activity() {
         root.addView(label("DENNIS  /  AI CHAT",21f,Color.WHITE,true))
         root.addView(label("Private local intelligence · online research when you choose",11.5f,muted),margin(top=3,bottom=10))
         val first=line()
-        val import=button("Import model",accent)
-        import.setOnClickListener { importModel() }
-        first.addView(import,margin(right=6))
+        val importButton=button("Import model",accent)
+        importButton.setOnClickListener { importModel() }
+        first.addView(importButton,margin(right=6))
         val settings=button("Search key")
         settings.setOnClickListener { showSettings() }
         first.addView(settings,margin(right=6))
