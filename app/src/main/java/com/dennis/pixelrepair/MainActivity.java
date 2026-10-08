@@ -39,9 +39,9 @@ public class MainActivity extends Activity {
 
     private CompareView preview;
     private TextView status, strengthLabel;
-    private Button saveButton, modeButton;
-    private Bitmap original, repaired;
-    private int sensitivity = 45, revision = 0, viewMode = 0;
+    private Button saveButton, modeButton, profileButton;
+    private Bitmap original, repaired, editMap;
+    private int sensitivity = 45, revision = 0, viewMode = 0, repairProfile = 1;
     private boolean isWorking = false;
 
     @Override public void onCreate(Bundle savedInstanceState) {
@@ -100,12 +100,22 @@ public class MainActivity extends Activity {
         modeParams.setMargins(dp(7), 0, 0, 0);
         actions.addView(modeButton, modeParams);
         modeButton.setOnClickListener(v -> {
-            viewMode = (viewMode + 1) % 3;
+            viewMode = (viewMode + 1) % 4;
             preview.setMode(viewMode);
             modeButton.setText("View: " + (viewMode == 0 ? "Split" :
-                viewMode == 1 ? "Original" : "Repaired"));
+                viewMode == 1 ? "Original" : viewMode == 2 ? "Repaired" : "Edits"));
         });
 
+        profileButton = button("Repair: Balanced");
+        LinearLayout.LayoutParams profileLp = new LinearLayout.LayoutParams(-1, dp(37));
+        profileLp.bottomMargin = dp(7);
+        root.addView(profileButton, profileLp);
+        profileButton.setOnClickListener(v -> {
+            repairProfile = (repairProfile + 1) % 3;
+            profileButton.setText(repairProfile == 0 ? "Repair: Defects only"
+                : repairProfile == 1 ? "Repair: Balanced" : "Repair: Shadow Lab");
+            processPhoto();
+        });
         preview = new CompareView();
         root.addView(preview, new LinearLayout.LayoutParams(-1, 0, 1f));
 
@@ -188,7 +198,8 @@ public class MainActivity extends Activity {
                     if (job != revision) return;
                     original = loadedFinal;
                     repaired = null;
-                    preview.setImages(original, null);
+                    editMap = null;
+                    preview.setImages(original, null, null);
                     processPhoto();
                 });
             } catch (Exception e) {
@@ -206,6 +217,7 @@ public class MainActivity extends Activity {
         if (original == null) return;
         final int job = ++revision;
         final int strength = sensitivity;
+        final int profile = repairProfile;
         final Bitmap input = original;
         isWorking = true; saveButton.setEnabled(false);
         status.setText("Inspecting " + input.getWidth() + " × " +
@@ -215,21 +227,29 @@ public class MainActivity extends Activity {
                 int w = input.getWidth(), h = input.getHeight();
                 int[] source = new int[w * h];
                 input.getPixels(source, 0, w, 0, 0, w, h);
-                PixelRepairEngine.Result result =
-                    PixelRepairEngine.repair(source, w, h, strength);
+                PixelRepairEngine.Result result = strength == 0
+                    ? new PixelRepairEngine.Result(source.clone(), 0)
+                    : PixelRepairEngine.repair(source, w, h, strength);
+                int defectCount = result.changedPixels;
+                int fineCount = (profile == 0) ? 0 :
+                    ShadowRepairEngine.denoise(source, result.pixels, w, h, strength, profile == 2);
+                int total = defectCount + fineCount;
                 Bitmap output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
                 output.setPixels(result.pixels, 0, w, 0, 0, w, h);
+                Bitmap changeMap = buildEditMap(source, result.pixels, w, h);
                 ui.post(() -> {
                     if (job != revision) return;
                     repaired = output;
-                    preview.setImages(input, output);
+                    editMap = changeMap;
+                    preview.setImages(input, output, changeMap);
                     saveButton.setEnabled(true);
                     isWorking = false;
                     status.setText(String.format(Locale.US,
-                        "Inspected %,d pixels · repaired %,d (%.4f%%).\n" +
-                        "Original untouched. Zoom in to compare.",
-                        (long) w * h, result.changedPixels,
-                        (100.0 * result.changedPixels) / ((long) w * h)));
+                        "Inspected %,d · edited %,d (%.4f%%).\\n" +
+                        "Defects: %,d · fine noise: %,d. Original preserved.",
+                        (long) w * h, total,
+                        (100.0 * total) / ((long) w * h),
+                        defectCount, fineCount));
                 });
             } catch (Exception e) {
                 ui.post(() -> {
@@ -240,6 +260,40 @@ public class MainActivity extends Activity {
                 });
             }
         });
+    }
+
+
+    // Compact map of actual original-vs-output RGB differences.
+    // Highlighting exaggerates edits for debugging; it is NOT photo content.
+    private static Bitmap buildEditMap(int[] source, int[] result, int w, int h) {
+        int step = Math.max(1, (int) Math.ceil(Math.max(w, h) / 768.0));
+        int mw=(w+step-1)/step, mh=(h+step-1)/step;
+        int[] sum = new int[mw*mh], count = new int[mw*mh];
+        for (int y=0; y<h; y++) {
+            int row=y*w, mapRow=(y/step)*mw;
+            for (int x=0; x<w; x++) {
+                int i=row+x;
+                if (source[i] == result[i]) continue;
+                int a=source[i], b=result[i];
+                int diff=Math.max(Math.abs(((a>>>16)&255)-((b>>>16)&255)),
+                    Math.max(Math.abs(((a>>>8)&255)-((b>>>8)&255)),
+                    Math.abs((a&255)-(b&255))));
+                int m=mapRow+x/step;
+                sum[m]+=Math.min(100,diff);
+                count[m]++;
+            }
+        }
+        int[] pixels=new int[mw*mh];
+        for(int i=0;i<pixels.length;i++){
+            if(count[i]==0)continue;
+            double diff=(double)sum[i]/count[i];
+            double coverage=(double)count[i]/(step*step);
+            int alpha=Math.min(218,(int)Math.round(43+diff*4+coverage*78));
+            pixels[i]=(alpha<<24)|0x00ffb938;
+        }
+        Bitmap out=Bitmap.createBitmap(mw,mh,Bitmap.Config.ARGB_8888);
+        out.setPixels(pixels,0,mw,0,0,mw,mh);
+        return out;
     }
 
     private void writePhoto(Uri uri) {
@@ -268,7 +322,7 @@ public class MainActivity extends Activity {
         private final Paint dividerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF imageRect = new RectF();
         private final ScaleGestureDetector scaleDetector;
-        private Bitmap left, right;
+        private Bitmap left, right, changedOverlay;
         private int mode = 0;
         private float zoom = 1f, dx = 0f, dy = 0f, lastX, lastY;
 
@@ -287,10 +341,11 @@ public class MainActivity extends Activity {
                 });
         }
 
-        void setImages(Bitmap originalBitmap, Bitmap repairedBitmap) {
+        void setImages(Bitmap originalBitmap, Bitmap repairedBitmap, Bitmap map) {
             boolean newPhoto = (left != originalBitmap);
             left = originalBitmap;
             right = repairedBitmap;
+            changedOverlay = map;
             if (newPhoto) { zoom = 1f; dx = 0; dy = 0; }
             invalidate();
         }
@@ -320,6 +375,9 @@ public class MainActivity extends Activity {
                     cx+imgWidth/2, cy+imgHeight/2);
             canvas.drawBitmap(base, null, imageRect, paint);
 
+            if (mode == 3 && changedOverlay != null) {
+                canvas.drawBitmap(changedOverlay, null, imageRect, paint);
+            }
             if (mode == 0 && right != null) {
                 canvas.save();
                 canvas.clipRect(getWidth()/2f, 0, getWidth(), getHeight());

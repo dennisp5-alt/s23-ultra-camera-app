@@ -30,7 +30,7 @@ jobs:
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: Pixel-Repair-Lab-v0.1.0-debug-apk
+          name: Pixel-Repair-Lab-v0.2.0-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
@@ -38,9 +38,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk Pixel-Repair-Lab-v0.1.0.apk
-          if gh release view pixel-repair-v0.1.0 >/dev/null 2>&1; then
-            gh release upload pixel-repair-v0.1.0 Pixel-Repair-Lab-v0.1.0.apk --clobber
+          cp app/build/outputs/apk/debug/app-debug.apk Pixel-Repair-Lab-v0.2.0.apk
+          if gh release view pixel-repair-v0.2.0 >/dev/null 2>&1; then
+            gh release upload pixel-repair-v0.2.0 Pixel-Repair-Lab-v0.2.0.apk --clobber
           else
-            gh release create pixel-repair-v0.1.0 Pixel-Repair-Lab-v0.1.0.apk --target "$GITHUB_SHA" --title "Pixel Repair Lab v0.1.0 (Standalone Android)" --notes "Offline experimental pixel-by-pixel repair app. Separate from Photo Master AI. Debug signed for personal testing." --prerelease
+            gh release create pixel-repair-v0.2.0 Pixel-Repair-Lab-v0.2.0.apk --target "$GITHUB_SHA" --title "Pixel Repair Lab v0.2.0 (Standalone Android)" --notes "Offline experimental pixel-by-pixel repair app. Separate from Photo Master AI. Debug signed for personal testing." --prerelease
           fi

@@ -4,11 +4,11 @@ android {
     namespace = "com.dennis.pixelrepair"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.dennis.pixelrepair"
+        applicationId = "com.dennis.pixelrepair.labv2"
         minSdk = 29
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
     buildTypes {
         getByName("release") { isMinifyEnabled = false }

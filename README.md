@@ -1,16 +1,11 @@
-# Pixel Repair Lab — standalone Android experiment
+# Pixel Repair Lab v0.2 — standalone offline Android experiment
 
-**Version 0.1.0**. Separate offline app; application ID `com.dennis.pixelrepair`. Created in the independent `pixel-repair-lab` branch without modifying the camera or Photo Master AI apps.
+Two distinct builds: v0.1 is preserved; v0.2 has application ID `com.dennis.pixelrepair.labv2` so both can remain installed side by side with different GitHub Actions debug signatures.
 
-## V0.1 scope
-- Import photographs using Android's system image picker
-- Preserve original dimensions for photographs up to 24 million pixels
-- Inspect each pixel and selectively repair high-confidence isolated hot/dead pixels and colour speckles
-- Adjustable sensitivity, before/after split preview and pinch-to-zoom
-- Save a repaired **lossless PNG** using Android's save-document picker
-- No internet, no access to other photos, no generative image synthesis, no blanket sharpening, no AI detail hallucination
+Features: full-resolution native pixel inspection, original v0.1 **Defects only** mode, **Balanced** conservative local shadow chroma repair, **Shadow Lab** stronger shadow colour-noise repair with selective deep-shadow luminance cleanup. Sensitivity 0 yields exact input RGB values. No generative AI and no artificial image detail. Daylight/edges receive explicit guards.
 
-**Limits:** A conservative algorithmic pixel repair experiment, not neural AI or inpainting. It cannot reliably fix heavy motion blur, large scratches, large JPEG block damage, defocus, large-area banding, etc. Processing is non-destructive; original file untouched. Image metadata/EXIF is not copied to output. Images above 24MP are rejected, not silently resized. Repeatable tests are included.
+The four display modes are **Split / Original / Repaired / Edits**. Edits is an intentionally exaggerated colour highlight of where any RGB values actually changed; it does not represent the edited photo's colours. Diagnostics separately show isolated defect and broader fine-noise counts. Export is a lossless PNG, original left intact.
 
-## Build
-GitHub Actions workflow **Pixel Repair Lab APK** runs on pushes to the `pixel-repair-lab` branch. Download the debug APK from its build artifact. Android API 29+.
+Limits: processing does not fix blur, defocus, JPEG blocking, large scratches or clipped detail. Metadata/EXIF are not preserved. Supports images up to 24 million pixels; memory/device performance should be tested. For small areas changed, before/after may appear identical at fit-to-screen; zoom in.
+
+Install from GitHub release asset `pixel-repair-v0.2.0` after the GitHub Actions build and unit tests pass.
