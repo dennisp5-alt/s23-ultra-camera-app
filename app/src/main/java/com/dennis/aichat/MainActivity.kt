@@ -82,7 +82,7 @@ class MainActivity : Activity() {
     private fun draw() {
         val root=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL
-            setBackgroundColor(background)
+            setBackgroundColor(this@MainActivity.background)
             setPadding(dp(15),dp(14),dp(15),dp(10))
         }
         root.addView(label("DENNIS  /  AI CHAT",21f,Color.WHITE,true))
