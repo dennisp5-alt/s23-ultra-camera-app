@@ -1,12 +1,7 @@
-# Android Studio / Gradle project settings for this app.
-# Keep generated files out of source control.
+.gradle/
+.idea/
+local.properties
+*/build/
 *.iml
-.gradle
-/local.properties
-/.idea/
-.DS_Store
-/build/
-/app/build/
-/captures/
-.externalNativeBuild/
-.cxx/
+*.apk
+*.litertlm

@@ -1,29 +1,17 @@
-# s23-ultra-camera-app
+# Dennis AI Chat 0.1 — Galaxy S23 Ultra
 
-A premium-style Android camera app for the Samsung Galaxy S23 Ultra built with CameraX.
+Android native local AI chat. Requires compatible LiteRT-LM .litertlm model imported from local storage. No inference API account is required. Web search is optional and uses a user-provided Brave Search API key.
 
-Features included:
-- Live camera preview
-- Photo capture
-- Front/back camera switching
-- Flash toggle support for compatible devices
-- Zoom control
-- Captured image preview thumbnail
-- Saves images to the device's Pictures folder
-- Android 15 / API 35 target
+- On-device LiteRT-LM (CPU first).
+- Chats and retrieved source excerpts saved locally in SQLite.
+- Opt-in Brave Search HTTPS research, protected API key via Android Keystore.
+- Offline conversations after model import.
+- Search results are untrusted excerpts, **not** independently verified claims, and do not modify model weights.
 
-## Tech stack
-- Kotlin
-- CameraX
-- AndroidX AppCompat + Material 3
-- Android Studio / Gradle
+## Install
+Download the GitHub Actions debug APK. Import an Android-compatible CPU `.litertlm` model, for example Gemma 3 1B from the [LiteRT community](https://huggingface.co/litert-community/Gemma3-1B-IT). Licence acceptance may be required. For optional online research, acquire your own key from [Brave Search](https://api-dashboard.search.brave.com/app/plans) and enable Research.
 
-## Run it
-1. Open this folder in Android Studio.
-2. Let Gradle sync finish.
-3. Connect a Samsung S23 Ultra or Android 15+ emulator.
-4. Run the app.
+## Build
+Uses JDK 17, Android SDK 36, Gradle 8.13, Android Gradle Plugin 8.13.2, Kotlin 2.2.20. `gradle :app:assembleDebug`.
 
-## Output location
-Captured images are saved under:
-- `Pictures/S23UltraCameraApp`
+**This is experimental.** Import, inference, device thermal performance, and long conversations must be validated on a Galaxy S23 Ultra.
