@@ -1,11 +1,18 @@
-# Pixel Repair Lab v0.2 — standalone offline Android experiment
+# Pixel Repair Lab v0.3.0 (Standalone, offline experiment)
 
-Two distinct builds: v0.1 is preserved; v0.2 has application ID `com.dennis.pixelrepair.labv2` so both can remain installed side by side with different GitHub Actions debug signatures.
+This build is designed specifically to evaluate the v0.2 Shadow Lab heatmap test on the Toowoomba foliage/sky image. Does NOT change Photo Master AI or the main camera branch.
 
-Features: full-resolution native pixel inspection, original v0.1 **Defects only** mode, **Balanced** conservative local shadow chroma repair, **Shadow Lab** stronger shadow colour-noise repair with selective deep-shadow luminance cleanup. Sensitivity 0 yields exact input RGB values. No generative AI and no artificial image detail. Daylight/edges receive explicit guards.
+## Safety changes
+- Shadow Lab uses a tighter darkness gate and **5x5 second-ring luminance/chroma structure guard**. This rejects heavily textured foliage/grass, roof patterns and high-contrast colour variation.
+- Deep mode performs **chroma-only** cleanup; unlike v0.2 it does not adjust shadow luminance. Real image detail should be less vulnerable to smoothing.
+- Balanced and Defects Only remain available.
+- The Edits view is now **black-background diagnostic heatmap**, not a tinted photograph. Cyan = weak/sparse edits, yellow = moderate, magenta = strong/dense edits. This is a *visualization of changed RGB values*, not proof of quality.
+- The diagnostic newline is fixed.
+- Unit tests cover shadow-chroma cleanup, unmodified daylight, sharp edges, natural texture, and no-op at sensitivity zero.
 
-The four display modes are **Split / Original / Repaired / Edits**. Edits is an intentionally exaggerated colour highlight of where any RGB values actually changed; it does not represent the edited photo's colours. Diagnostics separately show isolated defect and broader fine-noise counts. Export is a lossless PNG, original left intact.
+## Installation / output
+Experimental app ID `com.dennis.pixelrepair.labv3`, so v0.2 and v0.1 may remain installed side by side. Full-resolution PNG export without modifying original. Camera EXIF metadata not copied.
 
-Limits: processing does not fix blur, defocus, JPEG blocking, large scratches or clipped detail. Metadata/EXIF are not preserved. Supports images up to 24 million pixels; memory/device performance should be tested. For small areas changed, before/after may appear identical at fit-to-screen; zoom in.
+Built by GitHub Actions from `pixel-repair-lab`; direct APK and raw source-branch mirror named `Pixel-Repair-Lab-v0.3.0.apk`.
 
-Install from GitHub release asset `pixel-repair-v0.2.0` after the GitHub Actions build and unit tests pass.
+Image repairs are deterministic experiments, NOT AI reconstruction. Blur, blocked JPEG detail and lost source data are not recoverable with this engine.

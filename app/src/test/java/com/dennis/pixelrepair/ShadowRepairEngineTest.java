@@ -28,6 +28,25 @@ public class ShadowRepairEngineTest {
         assertEquals(0,ShadowRepairEngine.denoise(image,output,11,11,100,true));
         assertArrayEquals(image,output);
     }
+
+    @Test public void protectsDenseDarkFoliageTexture() {
+        int[] image=new int[225];
+        for (int y=0;y<15;y++) for(int x=0;x<15;x++)
+            image[y*15+x]=((x+y)&1)==0?0xff282e24:0xff464c42;
+        int[] output=image.clone();
+        int edited=ShadowRepairEngine.denoise(image,output,15,15,100,true);
+        assertEquals("Dense genuine texture should remain",0,edited);
+        assertArrayEquals(image,output);
+    }
+    @Test public void shadowLabCorrectsFlatShadowChroma() {
+        int[] image=new int[225];
+        Arrays.fill(image,0xff292929);
+        image[112]=0xff392329;
+        int[] output=image.clone();
+        int edited=ShadowRepairEngine.denoise(image,output,15,15,100,true);
+        assertTrue(edited>0);
+        assertNotEquals(image[112],output[112]);
+    }
     @Test public void zeroSensitivityIsPassThrough() {
         int[] image=new int[49];Arrays.fill(image,0xff232323);
         image[24]=0xff392329;

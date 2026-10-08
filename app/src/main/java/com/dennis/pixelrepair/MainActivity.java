@@ -245,7 +245,7 @@ public class MainActivity extends Activity {
                     saveButton.setEnabled(true);
                     isWorking = false;
                     status.setText(String.format(Locale.US,
-                        "Inspected %,d · edited %,d (%.4f%%).\\n" +
+                        "Inspected %,d · edited %,d (%.4f%%).\n" +
                         "Defects: %,d · fine noise: %,d. Original preserved.",
                         (long) w * h, total,
                         (100.0 * total) / ((long) w * h),
@@ -284,12 +284,17 @@ public class MainActivity extends Activity {
             }
         }
         int[] pixels=new int[mw*mh];
+        java.util.Arrays.fill(pixels, 0xff000000);
         for(int i=0;i<pixels.length;i++){
             if(count[i]==0)continue;
-            double diff=(double)sum[i]/count[i];
-            double coverage=(double)count[i]/(step*step);
-            int alpha=Math.min(218,(int)Math.round(43+diff*4+coverage*78));
-            pixels[i]=(alpha<<24)|0x00ffb938;
+            double intensity=(double)sum[i]/count[i];
+            double density=(double)count[i]/(step*step);
+            // Fully opaque heatmap: cyan = sparse/small edits, yellow = more
+            // substantial, magenta = large RGB differences. Never show image
+            // colours behind the heatmap.
+            pixels[i]=(intensity>10 || density>0.45) ? 0xffff4eb7 :
+                      (intensity>4 || density>0.12) ? 0xffffde55 :
+                      0xff34ebff;
         }
         Bitmap out=Bitmap.createBitmap(mw,mh,Bitmap.Config.ARGB_8888);
         out.setPixels(pixels,0,mw,0,0,mw,mh);
@@ -373,10 +378,17 @@ public class MainActivity extends Activity {
             float cy = getHeight() / 2f + dy;
             imageRect.set(cx-imgWidth/2, cy-imgHeight/2,
                     cx+imgWidth/2, cy+imgHeight/2);
-            canvas.drawBitmap(base, null, imageRect, paint);
-
             if (mode == 3 && changedOverlay != null) {
                 canvas.drawBitmap(changedOverlay, null, imageRect, paint);
+                // Legend is part of display only; no heatmap enters saved PNG.
+                Paint legend = new Paint(Paint.ANTI_ALIAS_FLAG);
+                legend.setTextSize(dp(12));
+                legend.setColor(Color.WHITE);
+                legend.setShadowLayer(dp(3),0,0,Color.BLACK);
+                canvas.drawText("EDITS ONLY  cyan:small   yellow:medium   pink:strong",
+                    dp(8), dp(24), legend);
+            } else {
+                canvas.drawBitmap(base, null, imageRect, paint);
             }
             if (mode == 0 && right != null) {
                 canvas.save();
