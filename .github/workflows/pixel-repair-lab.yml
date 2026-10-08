@@ -44,3 +44,15 @@ jobs:
           else
             gh release create pixel-repair-v0.2.0 Pixel-Repair-Lab-v0.2.0.apk --target "$GITHUB_SHA" --title "Pixel Repair Lab v0.2.0 (Standalone Android)" --notes "Offline experimental pixel-by-pixel repair app. Separate from Photo Master AI. Debug signed for personal testing." --prerelease
           fi
+      - name: Publish raw APK mirror on experimental branch
+        shell: bash
+        run: |
+          mkdir -p downloads
+          cp app/build/outputs/apk/debug/app-debug.apk downloads/Pixel-Repair-Lab-v0.2.0.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f downloads/Pixel-Repair-Lab-v0.2.0.apk
+          if ! git diff --cached --quiet; then
+            git commit -m "Publish standalone Pixel Repair Lab v0.2 APK mirror"
+            git push origin HEAD:pixel-repair-lab
+          fi
