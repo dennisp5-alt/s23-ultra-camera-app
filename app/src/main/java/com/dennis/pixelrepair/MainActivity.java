@@ -175,7 +175,7 @@ public class MainActivity extends Activity {
                 Bitmap loaded = ImageDecoder.decodeBitmap(source, (decoder, info, imageSource) -> {
                     Size size = info.getSize();
                     if ((long) size.getWidth() * size.getHeight() > MAX_PIXELS) {
-                        throw new IOException("This first test supports up to 24 MP. The file was NOT resized.");
+                        throw new IllegalArgumentException("This first test supports up to 24 MP. The file was NOT resized.");
                     }
                     decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
                     decoder.setMutableRequired(false);
