@@ -14,7 +14,7 @@ class KnowledgeDb(context: Context): SQLiteOpenHelper(context, "dennis_chat.db",
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {}
     fun addMessage(thread: Long, role: String, body: String) {
-        writableDatabase.execSQL("INSERT INTO messages(conversation,role,body,timestamp) VALUES(?,?,?,?)", arrayOf(thread,role,body,System.currentTimeMillis()))
+        writableDatabase.execSQL("INSERT INTO messages(conversation,role,body,timestamp) VALUES(?,?,?,?)", arrayOf<Any>(thread,role,body,System.currentTimeMillis()))
     }
     fun getMessages(thread: Long, limit: Int = 60): List<ChatLine> {
         val out=ArrayList<ChatLine>()
@@ -25,7 +25,7 @@ class KnowledgeDb(context: Context): SQLiteOpenHelper(context, "dennis_chat.db",
     }
     fun newConversation(): Long = System.currentTimeMillis()
     fun put(fact: ResearchFact) {
-        writableDatabase.execSQL("INSERT OR REPLACE INTO facts(title,url,snippet,timestamp) VALUES(?,?,?,?)", arrayOf(fact.title,fact.url,fact.snippet,fact.timestamp))
+        writableDatabase.execSQL("INSERT OR REPLACE INTO facts(title,url,snippet,timestamp) VALUES(?,?,?,?)", arrayOf<Any>(fact.title,fact.url,fact.snippet,fact.timestamp))
     }
     fun search(question: String, limit: Int = 4): List<ResearchFact> {
         val words=Regex("[a-zA-Z0-9]{4,}").findAll(question.lowercase()).map { it.value }.distinct().take(6).toList()

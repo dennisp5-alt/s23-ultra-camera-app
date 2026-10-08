@@ -35,7 +35,7 @@ ${if(context.isBlank()) "(none)" else context}
             when(it.role) { "user" -> Message.user(it.text); "assistant" -> Message.model(it.text.take(3000)); else -> null }
         }
         return active.createConversation(ConversationConfig(systemInstruction=Contents.of(policy),initialMessages=history)).use { conversation ->
-            conversation.sendMessage(question).text.trim()
+            conversation.sendMessage(question).toString().trim()
         }
     }
     fun close() { engine?.let { runCatching { it.close() } }; engine=null; openedModel=null }
