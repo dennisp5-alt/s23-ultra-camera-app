@@ -22,6 +22,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -49,10 +50,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var autoButton: Button
     private lateinit var saveButton: Button
 
-    private val imagePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    private val imagePicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri == null) return@registerForActivityResult
         scope.launch {
             setBusy(true)
+            info.text = "Loading photo…"
             try {
                 val bitmap = withContext(Dispatchers.IO) { decodePhoto(uri) }
                 image.setImageBitmap(null)
@@ -105,7 +107,7 @@ class MainActivity : ComponentActivity() {
             text = "Open"
             isAllCaps = false
             minHeight = (48 * resources.displayMetrics.density).roundToInt()
-            setOnClickListener { imagePicker.launch(arrayOf("image/*")) }
+            setOnClickListener { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
         }
         autoButton = Button(this).apply {
             text = "Auto"
@@ -262,7 +264,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /**
- * v0.2.1: conservative smartphone JPEG / HEIC correction.
+ * v0.2.2: enhanced smartphone JPEG / HEIC correction.
  *
  * The Galaxy S23 Ultra and similar phones have already performed HDR tone mapping,
  * colour rendering, denoising and sharpening. Retain that work; do not equalise
@@ -312,12 +314,12 @@ object ImageProcessor {
         val confidence = (neutralCount.toDouble() / sampled.coerceAtLeast(1) / 0.045)
             .coerceIn(0.0, 1.0)
         val reliable = neutralCount >= 120 && confidence >= 0.24
-        val strength = if (reliable) 0.63 * confidence else 0.0
+        val strength = if (reliable) 0.78 * confidence else 0.0
         val redGain = if (reliable) {
-            1.0 + ((sumG / sumR.coerceAtLeast(1.0)).coerceIn(0.89, 1.11) - 1.0) * strength
+            1.0 + ((sumG / sumR.coerceAtLeast(1.0)).coerceIn(0.86, 1.14) - 1.0) * strength
         } else 1.0
         val blueGain = if (reliable) {
-            1.0 + ((sumG / sumB.coerceAtLeast(1.0)).coerceIn(0.89, 1.11) - 1.0) * strength
+            1.0 + ((sumG / sumB.coerceAtLeast(1.0)).coerceIn(0.86, 1.14) - 1.0) * strength
         } else 1.0
 
         // Luma histogram, not per-channel stretching. Count clipped pixels so
@@ -367,29 +369,30 @@ object ImageProcessor {
         // Preserve low-light mood, snow and deliberately high-key compositions.
         val keyProtection = if (darkScene || brightScene) 0.25 else 1.0
         val error = when {
-            p50 < 0.35 -> 0.35 - p50
-            p50 > 0.66 -> 0.66 - p50
+            p50 < 0.39 -> 0.39 - p50
+            p50 > 0.64 -> 0.64 - p50
             else -> 0.0
         }
-        val targetMid = (p50 + 0.46 * keyProtection * error).coerceIn(0.02, 0.98)
-        val gamma = (ln(targetMid) / ln(p50)).coerceIn(0.88, 1.12)
+        val targetMid = (p50 + 0.66 * keyProtection * error).coerceIn(0.02, 0.98)
+        val gamma = (ln(targetMid) / ln(p50)).coerceIn(0.82, 1.18)
 
-        // Smart HDR photos usually already have sufficient contrast. Avoid
-        // stacking punch or lifting the darkest noisy pixels.
+        // More visible but still protected midtone contrast for rendered HDR.
+        // Avoid forcing already-dark night scenes into daytime brightness.
         val contrast = when {
-            range < 0.41 && !darkScene && !brightScene -> (0.41 - range) * 0.15
-            range > 0.78 -> -(range - 0.78) * 0.15
+            range < 0.50 && !darkScene && !brightScene -> (0.50 - range) * 0.22
+            range > 0.78 -> -(range - 0.78) * 0.18
             else -> 0.0
-        }.coerceIn(-0.018, 0.030)
+        }.coerceIn(-0.025, 0.065)
         val shadowLift = if (!darkScene && blackFraction < 0.18 &&
-            p05 < 0.065 && p90 > 0.67) 0.010 else 0.0
+            p05 < 0.095 && p90 > 0.60) 0.024 else 0.0
 
-        // Shoulder for already-rendered highlights. Do NOT falsely claim
+        // More pronounced but monotonic shoulder for rendered highlights.
+        // Do NOT falsely claim
         // to reconstruct white pixels that the camera has clipped.
         val highlightActivity = ease(0.60, 0.89, p90)
-        val rollOff = (0.08 + 0.15 * highlightActivity).coerceAtMost(0.23) *
+        val rollOff = (0.15 + 0.22 * highlightActivity).coerceAtMost(0.36) *
             (if (brightScene) 0.55 else 1.0) *
-            (if (clippedFraction > 0.045) 0.68 else 1.0)
+            (if (clippedFraction > 0.045) 0.60 else 1.0)
 
         val tone = DoubleArray(256)
         for (i in 0..255) {
@@ -399,7 +402,7 @@ object ImageProcessor {
             y += shadowLift * ease(0.015, 0.12, y) *
                 (1.0 - ease(0.20, 0.42, y))
             // Smooth roll-off, tapered back to unchanged diffuse/specular white.
-            y -= rollOff * ease(0.56, 0.87, y) * (1.0 - y)
+            y -= rollOff * ease(0.52, 0.85, y) * (1.0 - y)
             val adjusted = y.coerceIn(0.0, 1.0) * 255.0
             // Enforce monotonicity: no tonal reversals in high gradients.
             tone[i] = if (i == 0) adjusted else max(adjusted, tone[i - 1])
@@ -454,8 +457,8 @@ object ImageProcessor {
                     continue
                 } else target
 
-                // Gamut-safe RGB luma correction retains colour differences/hue
-                // without the saturation boost that v0.3 deliberately applied.
+                // Keep hue and skin tones intact; unlike the v0.3 experiment,
+                // don't apply forced global saturation.
                 val hi = max(r, max(g, b))
                 val lo = min(r, min(g, b))
                 var chroma = 1.0

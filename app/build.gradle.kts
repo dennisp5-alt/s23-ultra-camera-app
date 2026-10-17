@@ -9,8 +9,8 @@ android {
         applicationId = "com.example.autophoto.s23u"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.2.1-s23u"
+        versionCode = 2
+        versionName = "0.2.2-s23u-enhanced"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
