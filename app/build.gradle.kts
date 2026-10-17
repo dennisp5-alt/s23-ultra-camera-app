@@ -9,8 +9,8 @@ android {
         applicationId = "com.example.autophoto"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1-experiment"
+        versionCode = 2
+        versionName = "0.2-experiment"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
