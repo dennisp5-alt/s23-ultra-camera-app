@@ -133,23 +133,52 @@ object FullAIProcessor {
         }
         update(87)
 
-        // Strong neural enhancement on dark photos; restrained on bright HDR images.
-        var sum = 0.0
-        var n = 0
-        val skip = max(1, base.size / 30000)
-        for (i in base.indices step skip) {
+        // Histogram-guided neural strength. A dark background around bright
+        // flowers is NOT equivalent to an underexposed night photograph.
+        val histogram = IntArray(256)
+        val stride = max(1, base.size / 50000)
+        var samples = 0
+        for (i in base.indices step stride) {
             val p = base[i]
-            sum += 0.2126 * ((p shr 16) and 255) +
-                0.7152 * ((p shr 8) and 255) + 0.0722 * (p and 255)
-            n++
+            val y = (0.2126 * ((p shr 16) and 255) +
+                0.7152 * ((p shr 8) and 255) +
+                0.0722 * (p and 255)).roundToInt().coerceIn(0, 255)
+            histogram[y]++
+            samples++
         }
-        val avg = sum / n.coerceAtLeast(1)
-        val strength = when {
-            avg < 65 -> 0.95f
-            avg < 105 -> 0.85f
-            avg < 150 -> 0.75f
-            else -> 0.60f
+        fun percentile(fraction: Double): Float {
+            val target = max(1, (samples * fraction).roundToInt())
+            var seen = 0
+            for (i in 0..255) {
+                seen += histogram[i]
+                if (seen >= target) return i.toFloat()
+            }
+            return 255f
         }
+        val median = percentile(0.50)
+        val p90 = percentile(0.90)
+        val isNight = p90 < 91f
+        val darkBackgroundWithBrightSubject = median < 52f && p90 > 100f
+        val sceneStrength = when {
+            darkBackgroundWithBrightSubject -> 0.25f
+            isNight -> 0.56f
+            median < 72f -> 0.34f
+            else -> 0.28f
+        }
+
+        // Smooth local protection prevents neon foliage, pale-petal clipping
+        // and the hard dark/bright boundaries seen in v0.3.0.
+        fun ease(value: Float): Float {
+            val t = value.coerceIn(0f, 1f)
+            return t * t * (3f - 2f * t)
+        }
+        fun liftLimit(y: Float): Float = (when {
+            y < 20f -> 2.5f + y * 0.1f
+            y < 70f -> 4.5f + (y - 20f) * 0.19f
+            y < 135f -> 14f
+            y < 195f -> 14f - (y - 135f) * 0.18f
+            else -> 3.2f
+        }) * if (isNight) 1.6f else 1f
 
         fun sample(x: Float, y: Float, channel: Int): Float {
             val px = x.coerceIn(0f, (w - 1).toFloat())
@@ -186,15 +215,43 @@ object FullAIProcessor {
                     val g = ((p shr 8) and 255).toFloat()
                     val b = (p and 255).toFloat()
                     val luminance = 0.2126f * r + 0.7152f * g + 0.0722f * b
-                    val highlight = 1f - 0.65f * ((luminance - 200f) / 55f).coerceIn(0f, 1f)
-                    val blend = strength * highlight
                     val dr = sample(px, py, 0)
                     val dg = sample(px, py, 1)
                     val db = sample(px, py, 2)
                     val dl = 0.2126f * dr + 0.7152f * dg + 0.0722f * db
-                    val rr = (r + blend * (dl + 0.60f * (dr - dl))).roundToInt().coerceIn(0, 255)
-                    val gg = (g + blend * (dl + 0.60f * (dg - dl))).roundToInt().coerceIn(0, 255)
-                    val bb = (b + blend * (dl + 0.60f * (db - dl))).roundToInt().coerceIn(0, 255)
+
+                    // Preserve the dark scene mood while permitting learned
+                    // correction in actual midtone detail.
+                    val shadowMask = 0.14f + 0.86f *
+                        ease((luminance - 12f) / 68f)
+                    val highlightMask = 1f - 0.94f *
+                        ease((luminance - 128f) / 116f)
+                    val neuralBlend = sceneStrength * shadowMask * highlightMask
+                    val negativeLimit = when {
+                        luminance < 30f -> 2.5f
+                        luminance > 170f -> 4f
+                        else -> 8f
+                    }
+                    val neuralTone = (dl * neuralBlend)
+                        .coerceIn(-negativeLimit, liftLimit(luminance))
+
+                    // MIRNet's RGB shifts must not turn existing greens neon or
+                    // change the pink petals. Neural luminance remains active;
+                    // neural chroma contribution is limited to subtle correction.
+                    val spread = max(r, max(g, b)) - min(r, min(g, b))
+                    val saturation = (spread / max(32f, max(r, max(g, b))))
+                        .coerceIn(0f, 1f)
+                    val chromaBlend = sceneStrength * 0.14f * highlightMask *
+                        (1f - 0.70f * saturation)
+                    val chromaR = ((dr - dl) * chromaBlend)
+                        .coerceIn(-2.5f, 2.5f)
+                    val chromaG = ((dg - dl) * chromaBlend)
+                        .coerceIn(-2.5f, 2.5f)
+                    val chromaB = ((db - dl) * chromaBlend)
+                        .coerceIn(-2.5f, 2.5f)
+                    val rr = (r + neuralTone + chromaR).roundToInt().coerceIn(0, 255)
+                    val gg = (g + neuralTone + chromaG).roundToInt().coerceIn(0, 255)
+                    val bb = (b + neuralTone + chromaB).roundToInt().coerceIn(0, 255)
                     pixels[i] = (alpha shl 24) or (rr shl 16) or (gg shl 8) or bb
                 }
             }

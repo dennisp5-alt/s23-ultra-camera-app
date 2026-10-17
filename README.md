@@ -1,21 +1,19 @@
-# AutoPhoto S23 v0.3.0 — Full AI Offline Experiment
+# AutoPhoto S23 v0.3.1 — Full AI natural-light safeguards
 
-Built from working AutoPhoto S23 v0.2.2. **Existing AUTO processing is unchanged.** New separate **Full AI** button invokes a genuine pretrained MIRNet neural network on-device via TensorFlow Lite.
+Built from working Full AI v0.3.0, retaining the genuine pretrained MIRNet network and the exact existing v0.2.2 Auto editing pipeline. All inference remains offline, through TensorFlow Lite. Photo Picker, original/after comparison, Save and current launcher icon remain intact.
 
-The `mirnet_fp16.tflite` model is downloaded **during GitHub Actions compilation only** from [Sayak Paul's MIRNet TFLite release](https://github.com/sayakpaul/MIRNet-TFLite-TRT/releases/tag/v0.1.0), and then packaged inside the APK. The installed app makes zero remote requests and requires no model downloads during use. MIRNet implementation and weights originate from [Soumik Rakshit MIRNet (Apache-2.0)](https://github.com/soumik12345/MIRNet) and the original [MIRNet research](https://arxiv.org/abs/2003.06792).
+### Changes since v0.3.0
+- Distinguishes dark backgrounds with bright subjects from genuinely dark low-light scenes, using the median and 90th percentile of the phone image's luminance histogram.
+- Reduces AI strength on high-contrast, daylight subjects such as the supplied pink rose.
+- Introduces smooth shadow and highlight masks and hard per-pixel neural luminance caps: typically no more than 14/255 positive change in midtones, ~3/255 on very bright highlights and very little change to darkest backgrounds. Genuinely dark scenes permit somewhat more lifting.
+- Preserves natural hue and local colour: RGB chroma changes learned by MIRNet are restrained to ±2.5/255 per channel, with extra protection for saturated petals and leaves.
+- Maintains native photo detail with overlapped MIRNet low-resolution guidance transferred to the higher-resolution decoded input; no new sharpening, no fake generative details.
+- Keeps `ImageProcessor.correct` (Auto) unchanged. Full AI runs its own inference and blending.
 
-## Modes
+### Model and limitations
+MIRNet is a neural low-light enhancement/restoration model bundled in the APK during GitHub Actions build, with no model download or network requirement on Android. This v0.3.1 change is an experimental model-output integration and **has not yet been compared against saved Full AI v0.3.1 results from the phone**. It cannot reconstruct truly clipped highlights or deliver generative object repair. Full AI may be slow on the Galaxy S23 Ultra.
 
-- **AUTO:** exactly the existing v0.2.2 HDR-aware conventional correction code.
-- **FULL AI:** float32 TFLite inference of fp16-weight MIRNet, performed in overlapping 400x400 neural tiles at a working-resolution maximum 1280-pixel edge; seamless neural correction map transferred onto original 4096px-decoded photo to maintain original fine detail, and blended according to global scene brightness/highlight protection.
+### Practical image-quality tests
+Compare original / Auto / Full AI with the same rose and low-light photos. Prefer saved JPEGs over screenshots for evaluation. Score pink petal detail, natural greens, dark background mood, halos and overall colour fidelity.
 
-## Honest limitations
-
-- MIRNet is trained for **low-light image restoration and enhancement**, not every kind of photo edit.
-- Full AI can improve low-light tone but may alter hues and be inferior to AUTO on some photos.
-- It is not generative content replacement, super-resolution, RAW recovery, subject segmentation, or guaranteed face repair; fully clipped highlights cannot be reconstructed.
-- Working-resolution 1280-pixel AI guidance is used to bound memory and avoid model OOM. Full resolution output retains original texture but is not full-resolution learned denoising.
-- Processing can take minutes and should be tested for quality, heat, memory and successful inference on the Galaxy S23 Ultra. No claim of completed device testing.
-- Existing image picker, native-resolution photo preview, icon and JPEG save pipeline are preserved. App runs offline.
-
-App ID `com.example.autophoto.s23u.fullai` (separate install from AutoPhoto S23 v0.2.2). Experimental branch `autophoto-full-ai` leaves all other versions intact.
+Development on `autophoto-full-ai`; other app branches remain unchanged.

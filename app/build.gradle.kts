@@ -9,8 +9,8 @@ android {
         applicationId = "com.example.autophoto.s23u.fullai"
         minSdk = 29
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0-full-ai"
+        versionCode = 4
+        versionName = "0.3.1-full-ai-natural"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
