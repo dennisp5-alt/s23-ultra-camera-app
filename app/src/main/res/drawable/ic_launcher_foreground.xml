@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Precision camera-ring silhouette, centered within adaptive safe area. -->
+    <path android:fillColor="#08111E"
+        android:pathData="M54,18 A36,36 0,1 1,53.999,18 Z"/>
+    <path android:fillColor="#657D99"
+        android:pathData="M54,21 A33,33 0,1 1,53.999,21 Z"/>
+    <path android:fillColor="#0B1727"
+        android:pathData="M54,24 A30,30 0,1 1,53.999,24 Z"/>
+    <path android:fillColor="#297DB0"
+        android:pathData="M54,28 A26,26 0,1 1,53.999,28 Z"/>
+    <path android:fillColor="#103044"
+        android:pathData="M54,30 A24,24 0,1 1,53.999,30 Z"/>
+    <!-- Cool and warm sides reflect before/after colour balancing. -->
+    <path android:fillColor="#154E70"
+        android:pathData="M54,30 A24,24 0,0 0,54,78 Z"/>
+    <path android:fillColor="#B46E38"
+        android:pathData="M54,30 A24,24 0,0 1,54,78 Z"/>
+    <path android:fillColor="#0B2233"
+        android:pathData="M31,64 Q43,53 54,61 Q65,49 77,64 L77,77 L31,77 Z"/>
+    <path android:fillColor="#315F72"
+        android:pathData="M31,70 Q42,65 52,70 Q64,60 77,66 L77,77 L31,77 Z"/>
+    <path android:strokeColor="#EFFAFF" android:strokeWidth="1.7"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M33,66 L41,62 L47,65 L53,53 L60,56 L66,47 L73,50"/>
+    <path android:fillColor="#FFCD82"
+        android:pathData="M67,37 A4.2,4.2 0,1 1,66.999,37 Z"/>
+    <path android:strokeColor="#BDEFFF" android:strokeWidth="1.6"
+        android:strokeLineCap="round" android:fillColor="@android:color/transparent"
+        android:pathData="M36,35 Q44,28 53,29"/>
+    <path android:strokeColor="#F0F8FF" android:strokeWidth="0.8"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M54,25 A29,29 0,0 1,75 34"/>
+</vector>

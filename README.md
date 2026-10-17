@@ -1,11 +1,15 @@
-# AutoPhoto Experiment v0.2 — highlight and natural-colour refinement
+# AutoPhoto S23 v0.2.1 — Smartphone HDR-aware
+Standalone Android 10+ experiment, using v0.2 as its base (NOT the deliberately extreme v0.3).
 
-Small offline Android app: Open → Auto → Save. Tap the preview to compare original and corrected.
+- Modest global sRGB tone correction for already-processed phone JPEG/HEIC.
+- Scene-aware histogram with dark/high-key protection, controlled highlight shoulder, subdued midtone contrast.
+- Confidence-checked near-neutral white balance, gently tapered near highlights.
+- Gamut-limited chroma preservation; no added sharpening or vibrance.
+- Input preview max edge 4096 pixels; original remains untouched.
+- Automatic JPG output to Pictures/AutoPhoto at quality 98.
+- Three controls: Open / Auto / Save; tap photo to compare.
+- Dedicated app ID `com.example.autophoto.s23u` and custom adaptive camera icon.
 
-The photo processor samples a luminance histogram, adapts exposure mildly, protects dark and bright scene intent, applies a smooth highlight roll-off, uses neutral-only white balance, and retains RGB chroma without independent channel equalization. It cannot reconstruct details that are already fully clipped in the source.
+**Limits:** Not a RAW editor, cannot recreate channel detail clipped in the source, and cannot guarantee accurate colour without a colour reference. Tune on real S23 Ultra samples before claiming superior results.
 
-No AI model, no internet access, no extra controls. JPEG output: 98%. Maximum input edge: 4096 pixels.
-
-Build: Android 10+, Java 17, Gradle 8.9, AGP 8.7.3. GitHub Actions publishes the debug APK.
-
-This experiment is on the isolated `autophoto-experiment` branch; the existing camera application's `main` branch is unchanged.
+Isolated `autophoto-s23u-v02` branch derived from v0.2. No changes to main camera app.

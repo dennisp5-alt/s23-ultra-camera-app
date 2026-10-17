@@ -6,11 +6,11 @@ android {
     namespace = "com.example.autophoto"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.example.autophoto"
+        applicationId = "com.example.autophoto.s23u"
         minSdk = 29
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2-experiment"
+        versionCode = 1
+        versionName = "0.2.1-s23u"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

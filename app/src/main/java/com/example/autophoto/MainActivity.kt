@@ -262,35 +262,35 @@ class MainActivity : ComponentActivity() {
 }
 
 /**
- * Histogram-guided correction for already-rendered sRGB photographs.
+ * v0.2.1: conservative smartphone JPEG / HEIC correction.
  *
- * Conservative white balance, scene-aware exposure, protected shadows and a
- * highlight shoulder. Adjusts luma, not three independent RGB histograms:
- * chroma is preserved as far as the sRGB gamut allows (no false colour).
- * A clipped white JPEG pixel contains no recoverable highlight detail.
+ * The Galaxy S23 Ultra and similar phones have already performed HDR tone mapping,
+ * colour rendering, denoising and sharpening. Retain that work; do not equalise
+ * RGB channels, add sharpening, or force every picture into a fixed histogram.
+ * SDR sRGB conversion is handled at decode.
  */
 object ImageProcessor {
-    private fun smoothstep(start: Double, end: Double, value: Double): Double {
-        val x = ((value - start) / (end - start)).coerceIn(0.0, 1.0)
-        return x * x * (3.0 - 2.0 * x)
+    private fun ease(a: Double, b: Double, value: Double): Double {
+        val t = ((value - a) / (b - a)).coerceIn(0.0, 1.0)
+        return t * t * (3.0 - 2.0 * t)
     }
 
     fun correct(src: Bitmap): Bitmap {
-        val width = src.width
-        val height = src.height
-        val row = IntArray(width)
-        val step = max(1, sqrt(width.toDouble() * height / 120_000.0).toInt())
+        val w = src.width
+        val h = src.height
+        val row = IntArray(w)
+        val step = max(1, sqrt(w.toDouble() * h / 125_000.0).toInt())
 
-        // Select modestly lit, approximately neutral pixels only.
-        // Grey-world applied to every pixel causes false casts in sunsets, foliage, etc.
+        // Search for reliable, *unsaturated* neutral reference patches, rather
+        // than assuming a scene dominated by a sky, grass or sunset should be grey.
         var sampled = 0
-        var neutrals = 0
+        var neutralCount = 0
         var sumR = 0.0
         var sumG = 0.0
         var sumB = 0.0
-        for (y in 0 until height step step) {
-            src.getPixels(row, 0, width, 0, y, width, 1)
-            for (x in 0 until width step step) {
+        for (y in 0 until h step step) {
+            src.getPixels(row, 0, w, 0, y, w, 1)
+            for (x in 0 until w step step) {
                 val p = row[x]
                 if ((p ushr 24) < 128) continue
                 sampled++
@@ -299,149 +299,178 @@ object ImageProcessor {
                 val b = p and 255
                 val hi = max(r, max(g, b))
                 val lo = min(r, min(g, b))
-                if (hi in 50..225 && (hi - lo) <= max(10.0, hi * 0.12)) {
+                val luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+                if (luma in 55.0..207.0 && hi - lo <= max(7.0, luma * 0.085)) {
+                    neutralCount++
                     sumR += r
                     sumG += g
                     sumB += b
-                    neutrals++
                 }
             }
         }
 
-        // Avoid changing intentional warm/cool light without a trustworthy reference.
-        val hasReference = neutrals >= max(60, sampled / 40)
-        val redGain = if (hasReference) {
-            1.0 + ((sumG / sumR.coerceAtLeast(1.0)).coerceIn(0.88, 1.12) - 1.0) * 0.7
+        val confidence = (neutralCount.toDouble() / sampled.coerceAtLeast(1) / 0.045)
+            .coerceIn(0.0, 1.0)
+        val reliable = neutralCount >= 120 && confidence >= 0.24
+        val strength = if (reliable) 0.63 * confidence else 0.0
+        val redGain = if (reliable) {
+            1.0 + ((sumG / sumR.coerceAtLeast(1.0)).coerceIn(0.89, 1.11) - 1.0) * strength
         } else 1.0
-        val blueGain = if (hasReference) {
-            1.0 + ((sumG / sumB.coerceAtLeast(1.0)).coerceIn(0.88, 1.12) - 1.0) * 0.7
+        val blueGain = if (reliable) {
+            1.0 + ((sumG / sumB.coerceAtLeast(1.0)).coerceIn(0.89, 1.11) - 1.0) * strength
         } else 1.0
 
-        // Histogram built from luma AFTER gentle white balance. Do not equalize
-        // per-channel histograms: doing that distorts hue, saturation and skin tones.
-        val histogram = IntArray(256)
-        var count = 0
-        for (y in 0 until height step step) {
-            src.getPixels(row, 0, width, 0, y, width, 1)
-            for (x in 0 until width step step) {
+        // Luma histogram, not per-channel stretching. Count clipped pixels so
+        // existing processed HDR highlights receive even more restrained editing.
+        val hist = IntArray(256)
+        var valid = 0
+        var clipped = 0
+        var nearBlack = 0
+        for (y in 0 until h step step) {
+            src.getPixels(row, 0, w, 0, y, w, 1)
+            for (x in 0 until w step step) {
                 val p = row[x]
                 if ((p ushr 24) < 128) continue
-                var r = ((p shr 16) and 255) * redGain
-                var g = ((p shr 8) and 255).toDouble()
-                var b = (p and 255) * blueGain
-                // Avoid channel-specific clipping from white balance.
-                val maximum = max(r, max(g, b))
-                if (maximum > 255.0) {
-                    val fit = 255.0 / maximum
-                    r *= fit
-                    g *= fit
-                    b *= fit
-                }
-                val luma = (0.2126 * r + 0.7152 * g + 0.0722 * b)
+                val r = (p shr 16) and 255
+                val g = (p shr 8) and 255
+                val b = p and 255
+                val lum = (0.2126 * r + 0.7152 * g + 0.0722 * b)
                     .roundToInt().coerceIn(0, 255)
-                histogram[luma]++
-                count++
+                hist[lum]++
+                valid++
+                if (lum >= 249 || (r >= 254 && g >= 254 && b >= 254)) clipped++
+                if (lum <= 15) nearBlack++
             }
         }
-        if (count == 0) return src.copy(Bitmap.Config.ARGB_8888, true)
+        if (valid == 0) return src.copy(Bitmap.Config.ARGB_8888, true)
 
-        fun percentile(fraction: Double): Double {
-            val threshold = max(1, (count * fraction).roundToInt())
-            var cumulative = 0
-            for (i in histogram.indices) {
-                cumulative += histogram[i]
-                if (cumulative >= threshold) return i / 255.0
+        fun percentile(f: Double): Double {
+            val target = max(1, (valid * f).roundToInt())
+            var n = 0
+            for (i in 0..255) {
+                n += hist[i]
+                if (n >= target) return i / 255.0
             }
             return 1.0
         }
 
+        val p05 = percentile(0.05)
         val p10 = percentile(0.10)
-        val median = percentile(0.50).coerceIn(0.02, 0.98)
+        val p50 = percentile(0.50).coerceIn(0.02, 0.98)
         val p90 = percentile(0.90)
         val p98 = percentile(0.98)
-        val lowKey = p90 < 0.53 && median < 0.30
-        val highKey = p10 > 0.49 && median > 0.64
-
-        // Don't force intentionally dark night photos or bright snow scenes to mid-grey.
-        // Only move markedly under/over-exposed medians, and then modestly.
-        val medianError = when {
-            median < 0.36 -> 0.36 - median
-            median > 0.62 -> 0.62 - median
+        val range = p90 - p10
+        val darkScene = p90 < 0.49 && p50 < 0.27
+        val brightScene = p10 > 0.52 && p50 > 0.69
+        val clippedFraction = clipped.toDouble() / valid
+        val blackFraction = nearBlack.toDouble() / valid
+        // Preserve low-light mood, snow and deliberately high-key compositions.
+        val keyProtection = if (darkScene || brightScene) 0.25 else 1.0
+        val error = when {
+            p50 < 0.35 -> 0.35 - p50
+            p50 > 0.66 -> 0.66 - p50
             else -> 0.0
         }
-        val compensation = if (lowKey || highKey) 0.25 else 0.58
-        val targetMedian = (median + medianError * compensation).coerceIn(0.02, 0.98)
-        val gamma = (ln(targetMedian) / ln(median)).coerceIn(0.84, 1.16)
+        val targetMid = (p50 + 0.46 * keyProtection * error).coerceIn(0.02, 0.98)
+        val gamma = (ln(targetMid) / ln(p50)).coerceIn(0.88, 1.12)
 
-        // Subtle midtone contrast; preserve black point and white point.
-        val midtoneContrast = ((0.61 - (p90 - p10)) * 0.16).coerceIn(0.0, 0.055)
-        val shadowLift = if (p10 < 0.08 && p90 > 0.62 && !lowKey) 0.025 else 0.0
+        // Smart HDR photos usually already have sufficient contrast. Avoid
+        // stacking punch or lifting the darkest noisy pixels.
+        val contrast = when {
+            range < 0.41 && !darkScene && !brightScene -> (0.41 - range) * 0.15
+            range > 0.78 -> -(range - 0.78) * 0.15
+            else -> 0.0
+        }.coerceIn(-0.018, 0.030)
+        val shadowLift = if (!darkScene && blackFraction < 0.18 &&
+            p05 < 0.065 && p90 > 0.67) 0.010 else 0.0
 
-        // Highlight roll-off redistributes existing bright gradations without
-        // flattening all whites. Retain brilliant specular reflections at 255.
-        val sceneHighlights = ((p90 - 0.64) * 1.55).coerceIn(0.0, 0.41)
-        val highlightStrength = (sceneHighlights +
-            if (p98 > 0.96 && p90 > 0.66) 0.045 else 0.0)
-            .coerceAtMost(0.45) * (if (highKey) 0.50 else 1.0)
+        // Shoulder for already-rendered highlights. Do NOT falsely claim
+        // to reconstruct white pixels that the camera has clipped.
+        val highlightActivity = ease(0.60, 0.89, p90)
+        val rollOff = (0.08 + 0.15 * highlightActivity).coerceAtMost(0.23) *
+            (if (brightScene) 0.55 else 1.0) *
+            (if (clippedFraction > 0.045) 0.68 else 1.0)
 
-        val curve = DoubleArray(256)
+        val tone = DoubleArray(256)
         for (i in 0..255) {
             val x = i / 255.0
             var y = x.pow(gamma)
-            // Symmetric midtone contrast: taper adjustment to zero at endpoints.
-            y += midtoneContrast * (y - 0.5) * (4.0 * y * (1.0 - y))
-            y += shadowLift * smoothstep(0.01, 0.18, y) *
-                (1.0 - smoothstep(0.26, 0.52, y))
-            y -= highlightStrength * smoothstep(0.57, 0.96, y) * (1.0 - y)
-            // Monotonic curve ensures no tone reversals or histogram posterization.
-            curve[i] = max(if (i == 0) 0.0 else curve[i - 1], y.coerceIn(0.0, 1.0) * 255.0)
+            y += contrast * (y - 0.5) * 4.0 * y * (1.0 - y)
+            y += shadowLift * ease(0.015, 0.12, y) *
+                (1.0 - ease(0.20, 0.42, y))
+            // Smooth roll-off, tapered back to unchanged diffuse/specular white.
+            y -= rollOff * ease(0.56, 0.87, y) * (1.0 - y)
+            val adjusted = y.coerceIn(0.0, 1.0) * 255.0
+            // Enforce monotonicity: no tonal reversals in high gradients.
+            tone[i] = if (i == 0) adjusted else max(adjusted, tone[i - 1])
         }
-        curve[255] = 255.0
+        tone[255] = 255.0
 
-        // Process in bounded batches. Preserve the original RGB colour differences,
-        // reducing chroma only when necessary to keep a colour inside sRGB.
-        val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val batchHeight = min(32, height)
-        val pixels = IntArray(width * batchHeight)
-        for (top in 0 until height step batchHeight) {
-            val rows = min(batchHeight, height - top)
-            src.getPixels(pixels, 0, width, 0, top, width, rows)
-            for (i in 0 until width * rows) {
+        // Reuse row batches instead of allocating arrays for an entire 200 MP
+        // image. The decode stage caps output dimensions at 4096 px.
+        val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val rowsPerBatch = min(32, h)
+        val pixels = IntArray(w * rowsPerBatch)
+        for (top in 0 until h step rowsPerBatch) {
+            val rows = min(rowsPerBatch, h - top)
+            src.getPixels(pixels, 0, w, 0, top, w, rows)
+            for (i in 0 until w * rows) {
                 val p = pixels[i]
                 val alpha = p ushr 24
-                if (alpha == 0) continue
-                var r = ((p shr 16) and 255) * redGain
-                var g = ((p shr 8) and 255).toDouble()
-                var b = (p and 255) * blueGain
-                val brightest = max(r, max(g, b))
-                if (brightest > 255.0) {
-                    val fit = 255.0 / brightest
+                if (alpha == 0) {
+                    pixels[i] = p
+                    continue
+                }
+                val inputR = ((p shr 16) and 255).toDouble()
+                val inputG = ((p shr 8) and 255).toDouble()
+                val inputB = (p and 255).toDouble()
+                val originalY = 0.2126 * inputR + 0.7152 * inputG + 0.0722 * inputB
+
+                // Apply WB to shadows and midtones; fade it near blown-out
+                // highlights to avoid cyan/magenta channel clipping.
+                val wbFade = 1.0 - ease(190.0, 252.0, max(inputR, max(inputG, inputB)))
+                var r = inputR * (1.0 + (redGain - 1.0) * wbFade)
+                var g = inputG
+                var b = inputB * (1.0 + (blueGain - 1.0) * wbFade)
+                val peak = max(r, max(g, b))
+                if (peak > 255.0) {
+                    val fit = 255.0 / peak
                     r *= fit
                     g *= fit
                     b *= fit
                 }
-                val luma = (0.2126 * r + 0.7152 * g + 0.0722 * b).coerceIn(0.0, 255.0)
-                val index = luma.toInt().coerceIn(0, 255)
-                val next = min(index + 1, 255)
-                val desired = curve[index] + (curve[next] - curve[index]) * (luma - index)
 
-                val brightestChannel = max(r, max(g, b))
-                val darkestChannel = min(r, min(g, b))
-                val highDistance = brightestChannel - luma
-                val lowDistance = luma - darkestChannel
+                val y = (0.2126 * r + 0.7152 * g + 0.0722 * b).coerceIn(0.0, 255.0)
+                val index = y.toInt().coerceIn(0, 255)
+                val next = min(index + 1, 255)
+                val target = tone[index] + (tone[next] - tone[index]) * (y - index)
+
+                // Skip nearly imperceptible per-pixel changes to keep processed
+                // smartphone JPEGs stable. Subtle correction is the goal.
+                val adjustment = if (kotlin.math.abs(target - originalY) < 0.35 &&
+                    kotlin.math.abs(redGain - 1.0) < 0.006 &&
+                    kotlin.math.abs(blueGain - 1.0) < 0.006) {
+                    pixels[i] = p
+                    continue
+                } else target
+
+                // Gamut-safe RGB luma correction retains colour differences/hue
+                // without the saturation boost that v0.3 deliberately applied.
+                val hi = max(r, max(g, b))
+                val lo = min(r, min(g, b))
                 var chroma = 1.0
-                if (highDistance > 0.001) {
-                    chroma = min(chroma, ((255.0 - desired) / highDistance).coerceAtLeast(0.0))
-                }
-                if (lowDistance > 0.001) {
-                    chroma = min(chroma, (desired / lowDistance).coerceAtLeast(0.0))
-                }
-                val rr = (desired + (r - luma) * chroma).roundToInt().coerceIn(0, 255)
-                val gg = (desired + (g - luma) * chroma).roundToInt().coerceIn(0, 255)
-                val bb = (desired + (b - luma) * chroma).roundToInt().coerceIn(0, 255)
-                pixels[i] = (alpha shl 24) or (rr shl 16) or (gg shl 8) or bb
+                val upper = hi - y
+                val lower = y - lo
+                if (upper > 0.001) chroma =
+                    min(chroma, ((255.0 - adjustment) / upper).coerceAtLeast(0.0))
+                if (lower > 0.001) chroma =
+                    min(chroma, (adjustment / lower).coerceAtLeast(0.0))
+                val outR = (adjustment + (r - y) * chroma).roundToInt().coerceIn(0, 255)
+                val outG = (adjustment + (g - y) * chroma).roundToInt().coerceIn(0, 255)
+                val outB = (adjustment + (b - y) * chroma).roundToInt().coerceIn(0, 255)
+                pixels[i] = (alpha shl 24) or (outR shl 16) or (outG shl 8) or outB
             }
-            result.setPixels(pixels, 0, width, 0, top, width, rows)
+            result.setPixels(pixels, 0, w, 0, top, w, rows)
         }
         return result
     }
