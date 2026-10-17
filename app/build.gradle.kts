@@ -9,8 +9,8 @@ android {
         applicationId = "com.example.autophoto.s23u.fullai"
         minSdk = 29
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.3.1-full-ai-natural"
+        versionCode = 5
+        versionName = "0.3.2-full-ai-gpu"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -22,5 +22,6 @@ android {
 dependencies {
     implementation("androidx.activity:activity-ktx:1.9.3")
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
+    implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }

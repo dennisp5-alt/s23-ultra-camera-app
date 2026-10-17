@@ -235,17 +235,26 @@ class MainActivity : ComponentActivity() {
             setBusy(true)
             info.text = "Full AI • loading offline neural model…"
             try {
+                val backend = java.util.concurrent.atomic.AtomicReference("initialising")
                 val output = withContext(Dispatchers.Default) {
-                    FullAIProcessor.enhance(this@MainActivity, source) { percent ->
-                        runOnUiThread {
-                            info.text = "Full AI • processing offline: " + percent + "%"
+                    FullAIProcessor.enhance(
+                        this@MainActivity,
+                        source,
+                        update = { percent ->
+                            runOnUiThread {
+                                info.text = "Full AI • " + backend.get() + " • " + percent + "%"
+                            }
+                        },
+                        status = { message ->
+                            backend.set(message)
+                            runOnUiThread { info.text = "Full AI • " + message }
                         }
-                    }
+                    )
                 }
                 corrected = output
                 showOriginal = false
                 image.setImageBitmap(output)
-                info.text = "Full AI complete — tap photo to compare"
+                info.text = "Full AI complete • " + backend.get() + " • tap to compare"
             } catch (e: Exception) {
                 errorMessage("Full AI failed", e)
             } finally {

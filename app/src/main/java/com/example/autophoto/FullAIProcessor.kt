@@ -2,8 +2,12 @@ package com.example.autophoto
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.SystemClock
+import android.util.Log
 import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
+import org.tensorflow.lite.gpu.CompatibilityList
+import org.tensorflow.lite.gpu.GpuDelegate
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -53,7 +57,9 @@ object FullAIProcessor {
             }
         }
 
-    fun enhance(context: Context, src: Bitmap, update: (Int) -> Unit): Bitmap {
+    fun enhance(context: Context, src: Bitmap, update: (Int) -> Unit,
+                status: (String) -> Unit = {}): Bitmap {
+        val startedAt = SystemClock.elapsedRealtime()
         val scale = min(1.0, MAX_WORK.toDouble() / max(src.width, src.height))
         val w = max(1, (src.width * scale).roundToInt())
         val h = max(1, (src.height * scale).roundToInt())
@@ -70,17 +76,19 @@ object FullAIProcessor {
         val input = ByteBuffer.allocateDirect(TILE * TILE * 3 * 4).order(ByteOrder.nativeOrder())
         val output = ByteBuffer.allocateDirect(TILE * TILE * 3 * 4).order(ByteOrder.nativeOrder())
 
-        val options = Interpreter.Options().apply {
-            setNumThreads(4)
-            setUseXNNPACK(true)
-        }
-        Interpreter(model(context), options).use { interpreter ->
+        // GPU creation, delegate attachment and *all* invocations happen on
+        // the same background worker thread (required by Android GPU delegate).
+        // We retain the same 400px patches, overlap and model for fidelity.
+        val mappedModel = model(context)
+
+        fun evaluate(interpreter: Interpreter, backend: String) {
             interpreter.resizeInput(0, intArrayOf(1, TILE, TILE, 3))
             interpreter.allocateTensors()
             check(interpreter.getInputTensor(0).shape().contentEquals(intArrayOf(1, TILE, TILE, 3)))
             check(interpreter.getOutputTensor(0).shape().contentEquals(intArrayOf(1, TILE, TILE, 3)))
             check(interpreter.getInputTensor(0).dataType() == DataType.FLOAT32)
             check(interpreter.getOutputTensor(0).dataType() == DataType.FLOAT32)
+            status(backend)
             var completed = 0
             for (top in ys) for (left in xs) {
                 input.clear()
@@ -123,6 +131,50 @@ object FullAIProcessor {
                 update(completed * 85 / total)
             }
         }
+
+        var backendUsed = "CPU (XNNPACK)"
+        var gpuFinished = false
+        var delegate: GpuDelegate? = null
+        try {
+            if (CompatibilityList().isDelegateSupportedOnThisDevice) {
+                status("Preparing GPU")
+                val gpuOptions = GpuDelegate.Options().apply {
+                    setPrecisionLossAllowed(false) // prefer image fidelity
+                }
+                val gpuDelegate = GpuDelegate(gpuOptions)
+                delegate = gpuDelegate
+                val interpreterOptions = Interpreter.Options().apply {
+                    addDelegate(gpuDelegate)
+                    setNumThreads(4)
+                }
+                Interpreter(mappedModel, interpreterOptions).use {
+                    evaluate(it, "GPU")
+                }
+                gpuFinished = true
+                backendUsed = "GPU"
+            }
+        } catch (failure: Throwable) {
+            if (failure is VirtualMachineError || failure is ThreadDeath) throw failure
+            Log.w("AutoPhotoFullAI", "GPU failed; falling back to CPU", failure)
+            status("GPU unavailable — switching to CPU")
+        } finally {
+            delegate?.close()
+        }
+
+        if (!gpuFinished) {
+            // On any GPU setup/inference failure restart *all* patches from
+            // scratch. Never mix a partial GPU output with a CPU output.
+            java.util.Arrays.fill(corrections, 0f)
+            java.util.Arrays.fill(weights, 0f)
+            val cpuOptions = Interpreter.Options().apply {
+                setNumThreads(4)
+                setUseXNNPACK(true)
+            }
+            Interpreter(mappedModel, cpuOptions).use {
+                evaluate(it, "CPU (XNNPACK)")
+            }
+        }
+        status("Applying neural corrections • " + backendUsed)
 
         for (i in weights.indices) {
             val inverse = 1f / weights[i].coerceAtLeast(0.001f)
@@ -259,6 +311,8 @@ object FullAIProcessor {
             if (top % 256 == 0) update(87 + (top.toDouble() / src.height * 12).toInt())
         }
         update(100)
+        val elapsed = (SystemClock.elapsedRealtime() - startedAt) / 1000L
+        status(backendUsed + " • " + elapsed + " s")
         return edited
     }
 }
