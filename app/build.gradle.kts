@@ -6,7 +6,7 @@ android {
     namespace = "com.example.autophoto"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.example.autophoto.s23u"
+        applicationId = "com.example.autophoto.s23u.fullai"
         minSdk = 29
         targetSdk = 35
         versionCode = 3

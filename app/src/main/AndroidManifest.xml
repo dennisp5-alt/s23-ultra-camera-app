@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:allowBackup="false" android:label="AutoPhoto S23" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round"
+    <application android:allowBackup="false" android:label="AutoPhoto Full AI" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
         <activity android:name="com.example.autophoto.MainActivity" android:exported="true">

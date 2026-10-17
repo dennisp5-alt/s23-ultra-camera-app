@@ -131,6 +131,9 @@ class MainActivity : ComponentActivity() {
             setOnClickListener { savePhoto() }
         }
         for (button in arrayOf(openButton, autoButton, aiButton, saveButton)) {
+            button.minWidth = 0
+            button.setPadding(0, 0, 0, 0)
+            button.textSize = 12f
             controls.addView(button, LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
             ).apply {

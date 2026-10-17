@@ -18,4 +18,4 @@ The `mirnet_fp16.tflite` model is downloaded **during GitHub Actions compilation
 - Processing can take minutes and should be tested for quality, heat, memory and successful inference on the Galaxy S23 Ultra. No claim of completed device testing.
 - Existing image picker, native-resolution photo preview, icon and JPEG save pipeline are preserved. App runs offline.
 
-App ID `com.example.autophoto.s23u`. Experimental branch `autophoto-full-ai` leaves all other versions intact.
+App ID `com.example.autophoto.s23u.fullai` (separate install from AutoPhoto S23 v0.2.2). Experimental branch `autophoto-full-ai` leaves all other versions intact.
