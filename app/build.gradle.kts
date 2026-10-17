@@ -9,8 +9,8 @@ android {
         applicationId = "com.example.autophoto"
         minSdk = 29
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2-experiment"
+        versionCode = 3
+        versionName = "0.3-idealized-histogram"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
