@@ -10,6 +10,10 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -67,11 +71,81 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Android 15/16 enforces edge-to-edge for target 35; pad for system bars.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         val pad = (12 * resources.displayMetrics.density).roundToInt()
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
             setPadding(pad, pad, pad, pad)
         }
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val safe = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or
+                    WindowInsetsCompat.Type.displayCutout()
+            )
+            view.setPadding(
+                pad + safe.left,
+                pad + safe.top,
+                pad + safe.right,
+                pad + safe.bottom
+            )
+            insets
+        }
+
+        // Controls must always be above the preview: no off-screen buttons.
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        openButton = Button(this).apply {
+            text = "Open"
+            isAllCaps = false
+            minHeight = (48 * resources.displayMetrics.density).roundToInt()
+            setOnClickListener { imagePicker.launch(arrayOf("image/*")) }
+        }
+        autoButton = Button(this).apply {
+            text = "Auto"
+            isAllCaps = false
+            minHeight = (48 * resources.displayMetrics.density).roundToInt()
+            setOnClickListener { autoCorrect() }
+        }
+        saveButton = Button(this).apply {
+            text = "Save"
+            isAllCaps = false
+            minHeight = (48 * resources.displayMetrics.density).roundToInt()
+            setOnClickListener { savePhoto() }
+        }
+        for (button in arrayOf(openButton, autoButton, saveButton)) {
+            controls.addView(button, LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+            ).apply {
+                marginStart = pad / 4
+                marginEnd = pad / 4
+            })
+        }
+        root.addView(controls, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
+
+        info = TextView(this).apply {
+            text = "Choose a photo to start"
+            gravity = Gravity.CENTER
+            setPadding(0, pad / 2, 0, pad / 2)
+        }
+        root.addView(info, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
+        progress = ProgressBar(this).apply { visibility = View.GONE }
+        root.addView(progress, LinearLayout.LayoutParams(
+            pad * 2, pad * 2
+        ).apply { gravity = Gravity.CENTER })
+
         image = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
             setBackgroundColor(0xFF151515.toInt())
@@ -80,33 +154,18 @@ class MainActivity : ComponentActivity() {
                 if (corrected != null) {
                     showOriginal = !showOriginal
                     setImageBitmap(if (showOriginal) original else corrected)
-                    info.text = if (showOriginal) "Original — tap photo to compare" else "Corrected — tap photo to compare"
+                    info.text = if (showOriginal) "Original — tap photo to compare"
+                        else "Corrected — tap photo to compare"
                 }
             }
         }
-        root.addView(image, LinearLayout.LayoutParams(-1, 0, 1f))
+        // Preview occupies remaining height and can shrink on smaller screens.
+        root.addView(image, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+        ))
 
-        info = TextView(this).apply {
-            text = "Choose a photo to start"
-            gravity = Gravity.CENTER
-            setPadding(0, pad, 0, pad / 2)
-        }
-        root.addView(info)
-        progress = ProgressBar(this).apply { visibility = View.GONE }
-        root.addView(progress, LinearLayout.LayoutParams(pad * 2, pad * 2).apply { gravity = Gravity.CENTER })
-
-        val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        openButton = Button(this).apply { text = "Open"; setOnClickListener { imagePicker.launch(arrayOf("image/*")) } }
-        autoButton = Button(this).apply { text = "Auto"; setOnClickListener { autoCorrect() } }
-        saveButton = Button(this).apply { text = "Save"; setOnClickListener { savePhoto() } }
-        for (button in arrayOf(openButton, autoButton, saveButton)) {
-            controls.addView(button, LinearLayout.LayoutParams(0, -2, 1f).apply {
-                marginStart = pad / 4
-                marginEnd = pad / 4
-            })
-        }
-        root.addView(controls)
         setContentView(root)
+        ViewCompat.requestApplyInsets(root)
         setBusy(false)
     }
 
