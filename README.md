@@ -1,13 +1,21 @@
-# AutoPhoto S23 v0.2.2 — Fast Picker + Stronger Auto
+# AutoPhoto S23 v0.3.0 — Full AI Offline Experiment
 
-Standalone Android 10+ photo correction experiment based on the natural-colour **v0.2 processing family**, with tuned brightness, shadow, contrast and highlights for preprocessed Samsung Galaxy S23 Ultra photos.
+Built from working AutoPhoto S23 v0.2.2. **Existing AUTO processing is unchanged.** New separate **Full AI** button invokes a genuine pretrained MIRNet neural network on-device via TensorFlow Lite.
 
-Changes:
-- **Android Photo Picker** replaces the old document-picker browser. Modern system picker with recent-photo grid and quick selection; actual UI varies by Android provider.
-- Stronger automatic exposure, midtone contrast and highlight shoulder, while protecting dark night photos, high-key subjects and already-clipped highlights.
-- Moderate confident neutral white balance adjustment; no universal RGB histogram equalisation or forced saturation / oversharpening.
-- Image selected asynchronously; preview capped at a 4096px maximum edge for stable memory on very large phone images.
-- Modern adaptive camera icon, offline processing, three buttons: **Open / Auto / Save**.
-- APK uses applicationId `com.example.autophoto.s23u` and version `0.2.2`.
+The `mirnet_fp16.tflite` model is downloaded **during GitHub Actions compilation only** from [Sayak Paul's MIRNet TFLite release](https://github.com/sayakpaul/MIRNet-TFLite-TRT/releases/tag/v0.1.0), and then packaged inside the APK. The installed app makes zero remote requests and requires no model downloads during use. MIRNet implementation and weights originate from [Soumik Rakshit MIRNet (Apache-2.0)](https://github.com/soumik12345/MIRNet) and the original [MIRNet research](https://arxiv.org/abs/2003.06792).
 
-Limits: no restoration of highlights that are fully white in the source, no RAW pipeline, and no guaranteed colourimetric accuracy without a reference target. Requires real-device image-quality testing. Existing v0.2 and aggressive v0.3 experiments are unchanged.
+## Modes
+
+- **AUTO:** exactly the existing v0.2.2 HDR-aware conventional correction code.
+- **FULL AI:** float32 TFLite inference of fp16-weight MIRNet, performed in overlapping 400x400 neural tiles at a working-resolution maximum 1280-pixel edge; seamless neural correction map transferred onto original 4096px-decoded photo to maintain original fine detail, and blended according to global scene brightness/highlight protection.
+
+## Honest limitations
+
+- MIRNet is trained for **low-light image restoration and enhancement**, not every kind of photo edit.
+- Full AI can improve low-light tone but may alter hues and be inferior to AUTO on some photos.
+- It is not generative content replacement, super-resolution, RAW recovery, subject segmentation, or guaranteed face repair; fully clipped highlights cannot be reconstructed.
+- Working-resolution 1280-pixel AI guidance is used to bound memory and avoid model OOM. Full resolution output retains original texture but is not full-resolution learned denoising.
+- Processing can take minutes and should be tested for quality, heat, memory and successful inference on the Galaxy S23 Ultra. No claim of completed device testing.
+- Existing image picker, native-resolution photo preview, icon and JPEG save pipeline are preserved. App runs offline.
+
+App ID `com.example.autophoto.s23u`. Experimental branch `autophoto-full-ai` leaves all other versions intact.

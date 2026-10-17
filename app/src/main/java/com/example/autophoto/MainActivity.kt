@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var info: TextView
     private lateinit var openButton: Button
     private lateinit var autoButton: Button
+    private lateinit var aiButton: Button
     private lateinit var saveButton: Button
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -115,13 +116,21 @@ class MainActivity : ComponentActivity() {
             minHeight = (48 * resources.displayMetrics.density).roundToInt()
             setOnClickListener { autoCorrect() }
         }
+        aiButton = Button(this).apply {
+            text = "Full AI"
+            isAllCaps = false
+            textSize = 12f
+            setPadding(0, 0, 0, 0)
+            minHeight = (48 * resources.displayMetrics.density).roundToInt()
+            setOnClickListener { fullAI() }
+        }
         saveButton = Button(this).apply {
             text = "Save"
             isAllCaps = false
             minHeight = (48 * resources.displayMetrics.density).roundToInt()
             setOnClickListener { savePhoto() }
         }
-        for (button in arrayOf(openButton, autoButton, saveButton)) {
+        for (button in arrayOf(openButton, autoButton, aiButton, saveButton)) {
             controls.addView(button, LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
             ).apply {
@@ -175,6 +184,7 @@ class MainActivity : ComponentActivity() {
         progress.visibility = if (busy) View.VISIBLE else View.GONE
         openButton.isEnabled = !busy
         autoButton.isEnabled = !busy && original != null
+        aiButton.isEnabled = !busy && original != null
         saveButton.isEnabled = !busy && corrected != null
     }
 
@@ -206,6 +216,35 @@ class MainActivity : ComponentActivity() {
                 info.text = "Corrected — tap photo to compare"
             } catch (e: Exception) {
                 errorMessage("Auto correction failed", e)
+            } finally {
+                setBusy(false)
+            }
+        }
+    }
+
+    /**
+     * A completely independent neural processing path.
+     * The existing ImageProcessor.correct (Auto) is never called here.
+     */
+    private fun fullAI() {
+        val source = original ?: return
+        scope.launch {
+            setBusy(true)
+            info.text = "Full AI • loading offline neural model…"
+            try {
+                val output = withContext(Dispatchers.Default) {
+                    FullAIProcessor.enhance(this@MainActivity, source) { percent ->
+                        runOnUiThread {
+                            info.text = "Full AI • processing offline: " + percent + "%"
+                        }
+                    }
+                }
+                corrected = output
+                showOriginal = false
+                image.setImageBitmap(output)
+                info.text = "Full AI complete — tap photo to compare"
+            } catch (e: Exception) {
+                errorMessage("Full AI failed", e)
             } finally {
                 setBusy(false)
             }
