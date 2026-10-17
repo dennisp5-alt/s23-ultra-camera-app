@@ -86,7 +86,7 @@ object AlternativeAIProcessor {
         val small=bitmapPixels(inputBmp)
         if(inputBmp!==src) inputBmp.recycle()
 
-        val model=ByteBuffer.allocateDirect(context.assets.open("mobileie_lolv1.tflite").use { it.available() })
+        val model=ByteBuffer.allocateDirect(context.assets.open("mobileie_lolv1.tflite").use { it.available() }).order(ByteOrder.nativeOrder())
         // A tiny model is copied to a direct buffer once per request. Its offline
         // flatbuffer identifier and float tensors are validated by the build.
         context.assets.open("mobileie_lolv1.tflite").use { stream ->
@@ -201,7 +201,8 @@ object AlternativeAIProcessor {
         floats.rewind()
         val timeInference=SystemClock.elapsedRealtime()
         val coefficients:FloatArray
-        OrtEnvironment.getEnvironment().use { env ->
+        val env = OrtEnvironment.getEnvironment()
+        run {
             val opts=OrtSession.SessionOptions().apply { setIntraOpNumThreads(4) }
             opts.use { options ->
                 env.createSession(assetBytes(context,"lut_classifier.onnx"),options).use { session ->
