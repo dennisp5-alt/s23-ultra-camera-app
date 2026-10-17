@@ -133,8 +133,17 @@ object AlternativeAIProcessor {
         }
         val p90=percentile(small,0.90f)
         val p50=percentile(small,0.50f)
-        val dark=p90<108
-        val baseStrength=if(dark)0.63f else if (p50<75) 0.42f else 0.29f
+        // The pink rose has a dark background and a bright subject. In v0.3.3
+        // the low-light model treated its dark backdrop as underexposure.
+        // Distinguish actual dark scenes from mixed-illumination photography.
+        val genuineLowLight=p90<88 && p50<40
+        val mixedLight=p50<52 && p90>102
+        val baseStrength=when {
+            genuineLowLight -> 0.56f
+            mixedLight -> 0.26f
+            p50<72 -> 0.36f
+            else -> 0.30f
+        }
         val edited=Bitmap.createBitmap(src.width,src.height,Bitmap.Config.ARGB_8888)
         val count=min(16,src.height)
         val buffer=IntArray(src.width*count)
@@ -163,15 +172,34 @@ object AlternativeAIProcessor {
                     val dg=targetG-originalG
                     val db=targetB-originalB
                     val dy=0.2126f*dr+0.7152f*dg+0.0722f*db
-                    val shadowProtect=0.20f+0.80f*ease((ly-14f)/65f)
-                    val highlightProtect=1f-0.90f*ease((ly-148f)/98f)
+                    // v0.3.4: preserve mood in deep shadows and the delicate
+                    // colours/gradations of bright subjects, without changing
+                    // the actual MobileIE inference or the sampled input size.
+                    val topChannel=max(r,max(g,b))
+                    val shadowProtect=0.06f+0.94f*ease((ly-22f)/65f)
+                    val highlightProtect=1f-0.88f*ease((ly-118f)/115f)
                     val gain=baseStrength*shadowProtect*highlightProtect
-                    val tone=(gain*dy).coerceIn(-10f,if(dark)18f else 12f)
-                    val saturation=(max(r,max(g,b))-min(r,min(g,b)))/255f
-                    val chromaGain=gain*0.22f*(1f-0.60f*saturation)
-                    val rr=(r+tone+((dr-dy)*chromaGain).coerceIn(-3f,3f)).roundToInt().coerceIn(0,255)
-                    val gg=(g+tone+((dg-dy)*chromaGain).coerceIn(-3f,3f)).roundToInt().coerceIn(0,255)
-                    val bb=(b+tone+((db-dy)*chromaGain).coerceIn(-3f,3f)).roundToInt().coerceIn(0,255)
+                    val liftLimit=when {
+                        ly<18f -> 1.2f
+                        ly<48f -> 4f
+                        ly<135f -> if(genuineLowLight) 17f else 12f
+                        ly<190f -> 8f
+                        else -> 3f
+                    }
+                    // Reduce brightness *only* minimally: MobileIE v0.3.3
+                    // tended to turn an already dark rose photograph darker.
+                    val clipSafeRise=(251f-topChannel).coerceAtLeast(0f)*0.55f
+                    val tone=(gain*dy).coerceIn(
+                        if(genuineLowLight) -3f else -1.5f,
+                        min(liftLimit,clipSafeRise)
+                    )
+                    val saturation=((topChannel-min(r,min(g,b)))/255f).coerceIn(0f,1f)
+                    val pinkPetal=r>g*1.20f && b>g*1.03f && r>85f
+                    val petalChroma=if(pinkPetal)0.30f else 1f
+                    val chromaGain=gain*0.10f*(1f-0.75f*saturation)*petalChroma
+                    val rr=(r+tone+((dr-dy)*chromaGain).coerceIn(-1.5f,1.5f)).roundToInt().coerceIn(0,255)
+                    val gg=(g+tone+((dg-dy)*chromaGain).coerceIn(-1.5f,1.5f)).roundToInt().coerceIn(0,255)
+                    val bb=(b+tone+((db-dy)*chromaGain).coerceIn(-1.5f,1.5f)).roundToInt().coerceIn(0,255)
                     buffer[i]=(a shl 24)or(rr shl 16)or(gg shl 8)or bb
                 }
             }
@@ -233,7 +261,13 @@ object AlternativeAIProcessor {
         }
         val allPixels=bitmapPixels(src)
         val p90=percentile(allPixels,0.90f)
-        val strength=if(p90<110)0.55f else 0.66f
+        val p50=percentile(allPixels,0.50f)
+        val mixedLight=p50<52 && p90>102
+        val strength=when {
+            mixedLight -> 0.48f
+            p90<88 -> 0.62f
+            else -> 0.57f
+        }
 
         fun cell(channel:Int,r:Int,g:Int,b:Int):Float =
             fused[channel*cells+b*DIM*DIM+g*DIM+r]
@@ -272,14 +306,29 @@ object AlternativeAIProcessor {
                 val dy=0.2126f*dr+0.7152f*dg+0.0722f*db
                 // Natural-photo guardrails: full learned LUT predicts the edit,
                 // but original hue/detail/bright petals remain protected.
-                val highlight=1f-0.85f*ease((luma-168f)/83f)
-                val shadow=0.40f+0.60f*ease((luma-8f)/40f)
+                // v0.3.4: keep the learned, image-specific LUT prediction,
+                // but protect black-point, rose petal highlights and hue.
+                val highest=max(r,max(g,b))
+                val shadow=0.08f+0.92f*ease((luma-18f)/75f)
+                val highlight=1f-0.91f*ease((luma-126f)/124f)
                 val gain=strength*highlight*shadow
-                val tone=(dy*gain).coerceIn(-14f,15f)
-                val chromaGain=gain*0.40f
-                val rr=(r+tone+((dr-dy)*chromaGain).coerceIn(-9f,9f)).roundToInt().coerceIn(0,255)
-                val gg=(g+tone+((dg-dy)*chromaGain).coerceIn(-9f,9f)).roundToInt().coerceIn(0,255)
-                val bb=(b+tone+((db-dy)*chromaGain).coerceIn(-9f,9f)).roundToInt().coerceIn(0,255)
+                val localLiftLimit=when {
+                    luma<24f -> 1.5f
+                    luma<52f -> 4.5f
+                    luma<140f -> 12f
+                    luma<190f -> 7f
+                    else -> 3f
+                }
+                val clippingHeadroom=(251f-highest).coerceAtLeast(0f)*0.55f
+                val negativeLimit=if(luma<52f) -1.5f else -6f
+                val tone=(dy*gain).coerceIn(negativeLimit,min(localLiftLimit,clippingHeadroom))
+                val saturation=((highest-min(r,min(g,b)))/255f).coerceIn(0f,1f)
+                val pinkPetal=r>g*1.20f && b>g*1.03f && r>85f
+                val petalChroma=if(pinkPetal)0.30f else 1f
+                val chromaGain=gain*0.14f*(1f-0.65f*saturation)*petalChroma
+                val rr=(r+tone+((dr-dy)*chromaGain).coerceIn(-2f,2f)).roundToInt().coerceIn(0,255)
+                val gg=(g+tone+((dg-dy)*chromaGain).coerceIn(-2f,2f)).roundToInt().coerceIn(0,255)
+                val bb=(b+tone+((db-dy)*chromaGain).coerceIn(-2f,2f)).roundToInt().coerceIn(0,255)
                 buffer[i]=(a shl 24)or(rr shl 16)or(gg shl 8)or bb
             }
             edited.setPixels(buffer,0,src.width,0,top,src.width,rows)

@@ -1,7 +1,7 @@
-name: Build AutoPhoto Alternative AI Lab v0.3.3
+name: Build AutoPhoto Alternative AI Lab v0.3.4
 on:
   push:
-    branches: [autophoto-ai-alternatives-v033]
+    branches: [autophoto-ai-alternatives-v034]
   workflow_dispatch:
 permissions:
   contents: read
@@ -49,6 +49,6 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AutoPhoto-AI-Lab-v0.3.3-APK
+          name: AutoPhoto-AI-Lab-v0.3.4-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error

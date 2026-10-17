@@ -1,18 +1,22 @@
-# AutoPhoto AI Lab v0.3.3 — MobileIE vs pretrained Adaptive 3D LUT
+# AutoPhoto AI Lab v0.3.4 — Natural photo and highlight refinement
 
-An **independent**, completely offline Android testing app for Galaxy S23 Ultra and similar phones. App ID: `com.example.autophoto.alternatives`. The existing AutoPhoto, MIRNet Full AI and camera app are unchanged.
+**Separate experimental application** for Samsung Galaxy S23 Ultra. Android application ID `com.example.autophoto.alternatives.v034` installs alongside AutoPhoto AI Lab v0.3.3, AutoPhoto Full AI/MIRNet and the existing camera app. No modifications to `MainActivity.autoCorrect()` or `ImageProcessor.correct()`—the working Auto correction remains unchanged.
 
-## Comparison modes
-- **AUTO:** the original AutoPhoto v0.2.2 histogram and natural-colour processor, verbatim.
-- **MobileIE AI:** actual trained ICCV2025 MobileIE low-light `lolv1.tflite` inference; confidence-weighted neural tone corrections transferred to the native-resolution photo with highlight/chroma safeguards.
-- **Learned 3D LUT:** actual pretrained Image-Adaptive-3DLUT classifier from Hui Zeng `sRGB/classifier.pth`, exported during CI to ONNX, predicting **image-dependent weights** of the official **three pretrained 33x33x33 LUT bases**. Full-resolution RGB trilinear LUT interpolation plus protective natural-colour tone blending. Not a hand-coded/fixed LUT masquerading as AI.
+## Modes
 
-All models are downloaded from official, Apache-2.0 code repos during APK build only and are included in the APK. The installed app makes no network calls and doesn't require downloading model weights.
+- **Auto:** Completely unchanged from v0.3.3.
+- **MobileIE AI:** Retains official pretrained ICCV 2025 `lolv1.tflite` and the same 768px neural guidance; now detects dark-background / bright-subject scenes, limits darkness and colour shifts, and protects pink highlights. True dark photos retain stronger learned enhancement.
+- **Learned 3D LUT:** Retains the official pretrained Image-Adaptive-3DLUT sRGB ONNX classifier and three 33^3 learned LUT bases. Uses the original full-resolution trilinear interpolation but protects black levels, highlights, pink colours and near-clipping channels; a **genuine image-specific AI-predicted LUT** is still applied.
+- Both modes report neural inference and total processing time.
 
-**Quality guidance:** These were trained on other low-light/retouching datasets, not the S23 Ultra. Compare same photo in each mode; learned neural output does not guarantee improvement, and Auto may remain best on many photos. Inputs max edge 4096px; MobileIE neural guidance at max 768px while LUT correction applies at the full imported bitmap size. No invented missing highlight details. Each mode records real on-device inference and total processing times.
+## QA, measurements and limitations
 
-### Source
-- MobileIE: https://github.com/AVC2-UESTC/MobileIE , original Apache 2.0 licence.
-- Image-Adaptive-3DLUT: https://github.com/HuiZeng/Image-Adaptive-3DLUT , original Apache 2.0 licence.
+The supplied 1536×1152 pink rose JPEGs informed the corrections. At v0.3.3, MobileIE delivered a darker warmer photograph and the learned 3D LUT version lifted black backgrounds too much. The v0.3.4 blending changes address these effects conservatively without changing the actual model inference workload or input resolution. They **have not been validated on the phone** yet; outcome must be compared using identical source photos.
 
-Preserves existing icon, Photo Picker and tap-to-compare. The old MIRNet models and APKs remain separately available.
+Machine learning models are trained for low-light/retouching datasets rather than custom Samsung rendering; image quality cannot be guaranteed. Their neural model weights are downloaded at **CI build time only** and packed into the offline APK, and the installed app makes no network calls.
+
+Official model repositories:
+- https://github.com/AVC2-UESTC/MobileIE
+- https://github.com/HuiZeng/Image-Adaptive-3DLUT
+
+Both projects supply Apache-2.0 licensed source/model assets.
