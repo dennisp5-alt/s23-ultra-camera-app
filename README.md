@@ -1,29 +1,7 @@
-# s23-ultra-camera-app
+# AutoPhoto Experiment v0.1
 
-A premium-style Android camera app for the Samsung Galaxy S23 Ultra built with CameraX.
+Standalone small offline Android photo-correction experiment. Open → Auto → Save. Tap image for original/corrected comparison.
 
-Features included:
-- Live camera preview
-- Photo capture
-- Front/back camera switching
-- Flash toggle support for compatible devices
-- Zoom control
-- Captured image preview thumbnail
-- Saves images to the device's Pictures folder
-- Android 15 / API 35 target
+Build: Android 10+, Java 17, Gradle 8.9, AGP 8.7.3. The Github Actions workflow builds a debug APK for testing.
 
-## Tech stack
-- Kotlin
-- CameraX
-- AndroidX AppCompat + Material 3
-- Android Studio / Gradle
-
-## Run it
-1. Open this folder in Android Studio.
-2. Let Gradle sync finish.
-3. Connect a Samsung S23 Ultra or Android 15+ emulator.
-4. Run the app.
-
-## Output location
-Captured images are saved under:
-- `Pictures/S23UltraCameraApp`
+This is an isolated `autophoto-experiment` branch. The `main` branch of the host repository is unchanged.
