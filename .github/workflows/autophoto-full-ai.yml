@@ -1,0 +1,59 @@
+name: AutoPhoto Full AI - Model Probe and APK
+on:
+  push:
+    branches: [autophoto-full-ai]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        shell: bash
+        run: |
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -1)"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
+      - name: Download offline pretrained neural model
+        shell: bash
+        run: |
+          mkdir -p app/src/main/assets /tmp/neural
+          curl -fL --retry 4 --retry-delay 5 --connect-timeout 20 \
+            "https://github.com/sayakpaul/MIRNet-TFLite-TRT/releases/download/v0.1.0/dynamic_shape.zip" \
+            -o /tmp/neural/dynamic_shape.zip
+          unzip -l /tmp/neural/dynamic_shape.zip | tail -25
+          unzip -oq /tmp/neural/dynamic_shape.zip -d /tmp/neural/unpacked
+          find /tmp/neural/unpacked -type f -printf "%s %p\n" | sort -n
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          files=list(Path("/tmp/neural/unpacked").rglob("*.tflite"))
+          assert files, "The release does not contain a TensorFlow Lite model"
+          files.sort(key=lambda f: (0 if any(s in f.name.lower() for s in ["fp16","float16"]) else 1, f.stat().st_size))
+          choice=files[0]
+          dest=Path("app/src/main/assets/mirnet_neural.tflite")
+          shutil.copyfile(choice,dest)
+          with dest.open("rb") as stream:
+              head=stream.read(8)
+          assert head[4:8]==b"TFL3", "Invalid TFLite flatbuffer"
+          print("SELECTED REAL PRETRAINED MODEL",choice,"bytes",dest.stat().st_size)
+          PY
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build Full AI debug APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Upload offline Full AI APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoPhoto-Full-AI-APK
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
