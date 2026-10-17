@@ -6,11 +6,11 @@ android {
     namespace = "com.example.autophoto"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.example.autophoto.s23u.fullai"
+        applicationId = "com.example.autophoto.alternatives"
         minSdk = 29
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.3.2-full-ai-gpu"
+        versionCode = 1
+        versionName = "0.3.3-ai-alternatives"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -22,7 +22,6 @@ android {
 dependencies {
     implementation("androidx.activity:activity-ktx:1.9.3")
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
-    implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
-    implementation("org.tensorflow:tensorflow-lite-gpu-api:2.16.1")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }

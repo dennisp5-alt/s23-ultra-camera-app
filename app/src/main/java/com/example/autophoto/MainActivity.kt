@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var openButton: Button
     private lateinit var autoButton: Button
     private lateinit var aiButton: Button
+    private lateinit var lutButton: Button
     private lateinit var saveButton: Button
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -117,12 +118,20 @@ class MainActivity : ComponentActivity() {
             setOnClickListener { autoCorrect() }
         }
         aiButton = Button(this).apply {
-            text = "Full AI"
+            text = "MobileIE AI"
             isAllCaps = false
             textSize = 12f
             setPadding(0, 0, 0, 0)
             minHeight = (48 * resources.displayMetrics.density).roundToInt()
-            setOnClickListener { fullAI() }
+            setOnClickListener { runAlternative(true) }
+        }
+        lutButton = Button(this).apply {
+            text = "Learned 3D LUT"
+            isAllCaps = false
+            textSize = 12f
+            minWidth = 0
+            minHeight = (48 * resources.displayMetrics.density).roundToInt()
+            setOnClickListener { runAlternative(false) }
         }
         saveButton = Button(this).apply {
             text = "Save"
@@ -130,7 +139,7 @@ class MainActivity : ComponentActivity() {
             minHeight = (48 * resources.displayMetrics.density).roundToInt()
             setOnClickListener { savePhoto() }
         }
-        for (button in arrayOf(openButton, autoButton, aiButton, saveButton)) {
+        for (button in arrayOf(openButton, autoButton, saveButton)) {
             button.minWidth = 0
             button.setPadding(0, 0, 0, 0)
             button.textSize = 12f
@@ -142,6 +151,26 @@ class MainActivity : ComponentActivity() {
             })
         }
         root.addView(controls, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
+
+        // Two model buttons in a second row, no clipped text on small screens.
+        val aiControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        for (button in arrayOf(aiButton, lutButton)) {
+            button.minWidth = 0
+            button.setPadding(0, 0, 0, 0)
+            aiControls.addView(button, LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+            ).apply {
+                marginStart = pad / 4
+                marginEnd = pad / 4
+            })
+        }
+        root.addView(aiControls, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         ))
@@ -188,6 +217,7 @@ class MainActivity : ComponentActivity() {
         openButton.isEnabled = !busy
         autoButton.isEnabled = !busy && original != null
         aiButton.isEnabled = !busy && original != null
+        lutButton.isEnabled = !busy && original != null
         saveButton.isEnabled = !busy && corrected != null
     }
 
@@ -229,34 +259,32 @@ class MainActivity : ComponentActivity() {
      * A completely independent neural processing path.
      * The existing ImageProcessor.correct (Auto) is never called here.
      */
-    private fun fullAI() {
+    /** Two distinct trained networks; the existing Auto method is unchanged. */
+    private fun runAlternative(mobile: Boolean) {
         val source = original ?: return
+        val mode = if (mobile) "MobileIE" else "Learned 3D LUT"
         scope.launch {
             setBusy(true)
-            info.text = "Full AI • loading offline neural model…"
+            info.text = mode + " • loading offline neural weights…"
             try {
-                val backend = java.util.concurrent.atomic.AtomicReference("initialising")
-                val output = withContext(Dispatchers.Default) {
-                    FullAIProcessor.enhance(
-                        this@MainActivity,
-                        source,
-                        update = { percent ->
-                            runOnUiThread {
-                                info.text = "Full AI • " + backend.get() + " • " + percent + "%"
-                            }
-                        },
-                        status = { message ->
-                            backend.set(message)
-                            runOnUiThread { info.text = "Full AI • " + message }
+                val result = withContext(Dispatchers.Default) {
+                    val update: (Int) -> Unit = { percent ->
+                        runOnUiThread {
+                            info.text = mode + " • processing " + percent + "%"
                         }
-                    )
+                    }
+                    if (mobile) AlternativeAIProcessor.mobileIE(this@MainActivity, source, update)
+                    else AlternativeAIProcessor.adaptiveLut(this@MainActivity, source, update)
                 }
-                corrected = output
+                corrected = result.bitmap
                 showOriginal = false
-                image.setImageBitmap(output)
-                info.text = "Full AI complete • " + backend.get() + " • tap to compare"
+                image.setImageBitmap(result.bitmap)
+                val total = result.totalMillis / 1000.0
+                val neural = result.inferenceMillis / 1000.0
+                info.text = mode + " • " + "%.1f".format(total) + "s total / " +
+                    "%.1f".format(neural) + "s neural • tap to compare"
             } catch (e: Exception) {
-                errorMessage("Full AI failed", e)
+                errorMessage(mode + " failed", e)
             } finally {
                 setBusy(false)
             }

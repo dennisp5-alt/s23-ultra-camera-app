@@ -1,14 +1,18 @@
-# AutoPhoto S23 Full AI v0.3.2 — GPU-first performance test
+# AutoPhoto AI Lab v0.3.3 — MobileIE vs pretrained Adaptive 3D LUT
 
-Keeps **Auto processing exactly unchanged** and preserves Full AI v0.3.1 tone, rose-highlight protection, colour masks, and 400-pixel overlapping MIRNet processing. The model remains bundled and fully offline.
+An **independent**, completely offline Android testing app for Galaxy S23 Ultra and similar phones. App ID: `com.example.autophoto.alternatives`. The existing AutoPhoto, MIRNet Full AI and camera app are unchanged.
 
-New performance path:
-- Attempts TensorFlow Lite GPU delegation on compatible Android hardware.
-- Creates the GPU delegate and performs *all inference on the same background worker thread*.
-- Requests highest GPU precision rather than permitting fp16 compute precision loss.
-- If GPU setup or inference is unsupported, safely cleans up, discards partial predictions and re-runs the *complete* image with 4-thread XNNPACK CPU inference.
-- Shows **GPU** or **CPU (XNNPACK)** in the processing status and displays elapsed seconds at completion.
+## Comparison modes
+- **AUTO:** the original AutoPhoto v0.2.2 histogram and natural-colour processor, verbatim.
+- **MobileIE AI:** actual trained ICCV2025 MobileIE low-light `lolv1.tflite` inference; confidence-weighted neural tone corrections transferred to the native-resolution photo with highlight/chroma safeguards.
+- **Learned 3D LUT:** actual pretrained Image-Adaptive-3DLUT classifier from Hui Zeng `sRGB/classifier.pth`, exported during CI to ONNX, predicting **image-dependent weights** of the official **three pretrained 33x33x33 LUT bases**. Full-resolution RGB trilinear LUT interpolation plus protective natural-colour tone blending. Not a hand-coded/fixed LUT masquerading as AI.
 
-**Important:** GPU support and performance are model/device dependent; the Galaxy S23 Ultra may still use CPU if MIRNet contains operations that cannot run efficiently on the GPU. This is a diagnostic and acceleration experiment, not a guarantee of a large speedup. The initial GPU setup may be slower.
+All models are downloaded from official, Apache-2.0 code repos during APK build only and are included in the APK. The installed app makes no network calls and doesn't require downloading model weights.
 
-No changes to input decoding, work resolution, overlap, image sharpening, luminance/chroma correction limits, or JPEG saving.
+**Quality guidance:** These were trained on other low-light/retouching datasets, not the S23 Ultra. Compare same photo in each mode; learned neural output does not guarantee improvement, and Auto may remain best on many photos. Inputs max edge 4096px; MobileIE neural guidance at max 768px while LUT correction applies at the full imported bitmap size. No invented missing highlight details. Each mode records real on-device inference and total processing times.
+
+### Source
+- MobileIE: https://github.com/AVC2-UESTC/MobileIE , original Apache 2.0 licence.
+- Image-Adaptive-3DLUT: https://github.com/HuiZeng/Image-Adaptive-3DLUT , original Apache 2.0 licence.
+
+Preserves existing icon, Photo Picker and tap-to-compare. The old MIRNet models and APKs remain separately available.
