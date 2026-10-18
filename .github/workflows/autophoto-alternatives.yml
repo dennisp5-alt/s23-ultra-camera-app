@@ -1,7 +1,7 @@
-name: Build AutoPhoto Quality Lab v0.4.2
+name: Build AutoPhoto Polished AI Lab v0.4.3
 on:
   push:
-    branches: [autophoto-quality-lab-v042]
+    branches: [autophoto-polished-lab-v043]
   workflow_dispatch:
 permissions:
   contents: write
@@ -76,14 +76,25 @@ jobs:
           assert "fun enhanceAdaptiveStrong(" in p
           assert "localMinimumY" in p and "skinGuide" in p and "skyGuide" in p
           assert all(t in ui for t in ["ImageProcessor.correct(input)", "MaskedAIProcessor.enhanceScene", "detailProgressActive = false"])
-          assert "applicationId = \"com.example.autophoto.qualitylab.v042\"" in Path("app/build.gradle.kts").read_text()
-          print("Three selectable presets, original Auto, scene engine, and isolated app ID verified")
+          assert "applicationId = \"com.example.autophoto.polished.v043\"" in Path("app/build.gradle.kts").read_text()
+          polished=Path("app/src/main/java/com/example/autophoto/PolishedAIProcessor.kt").read_text()
+          assert all(t in polished for t in [
+              'AlternativeAIProcessor.adaptiveLut(',
+              'POLISHED("Polished"', 'POLISHED_PLUS("Polished+"',
+              'WOW("Wow"', 'darkSceneProtected = darkScene'
+          ])
+          assert all(t in ui for t in [
+              "PolishedAIProcessor.enhance(",
+              "refreshPolishedButtons()",
+              "runPolishedAI()"
+          ])
+          print("Polished neural LUT pipeline, three A/B looks, original engines and app ID verified")
           PY
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AutoPhoto-Quality-Lab-v0.4.2-APK
+          name: AutoPhoto-Polished-AI-Lab-v0.4.3-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
@@ -91,19 +102,20 @@ jobs:
         if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: autophoto-quality-lab-v0.4.2
-          name: AutoPhoto Quality Lab v0.4.2 — Adaptive Strong Local Detail
+          tag_name: autophoto-polished-lab-v0.4.3
+          name: AutoPhoto Polished AI Lab v0.4.3 — Three Offline Neural-LUT Looks
           make_latest: false
           generate_release_notes: false
           body: |
-            Experimental update to v0.4.1; all previous apps remain installed.
-            Adaptive Strong Detail v0.4.2 as a new separate button,
-            retaining Gentle/Balanced/Strong comparisons unchanged.
-            Soft tonal sky and warm skin guides guard sensitive edges.
-            Additional local extrema safeguard rejects new sharpening halos.
-            Offline, original resolution, true neural AI modes unaffected.
-            Compare Strong vs Adaptive Strong on bottlebrush, powerlines,
-            portrait, water, rose and foliage before choosing.
+            New independent Polished AI Lab v0.4.3: Polished / Polished+ / Wow.
+            Every run uses the original full-resolution photograph, an actual
+            pretrained image-adaptive 3D LUT (ONNX), followed by scene-aware
+            tonal contrast, adaptive vibrance, texture enhancement and safeguards.
+            Protects near-black night scenes, skin-like tones, saturated reds,
+            highlights and bokeh. No generative detail or online inference.
+            Includes all existing Auto, Strong, Adaptive Strong and neural modes
+            unchanged. New unique app ID preserves every previous installation.
+            This is an experiment; quality requires real S23 Ultra A/B tests.
           files: app/build/outputs/apk/debug/*.apk
           fail_on_unmatched_files: true
           overwrite_files: true

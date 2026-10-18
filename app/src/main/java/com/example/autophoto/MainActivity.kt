@@ -59,6 +59,12 @@ class MainActivity : ComponentActivity() {
     private lateinit var detailGentleButton: Button
     private lateinit var detailBalancedButton: Button
     private lateinit var detailStrongButton: Button
+    private lateinit var polishedButton: Button
+    private lateinit var polishNormalButton: Button
+    private lateinit var polishPlusButton: Button
+    private lateinit var polishWowButton: Button
+    private var polishedStyle = PolishedAIProcessor.Style.POLISHED_PLUS
+    private var polishedProgressActive = false
     private lateinit var detailAdaptiveButton: Button
     // User-preferred Strong is the new default; original Gentle/Balanced/
     // Strong run unchanged for an A/B regression comparison.
@@ -303,6 +309,52 @@ class MainActivity : ComponentActivity() {
             marginEnd = pad / 4
         })
 
+        // Three A/B finishing looks; each starts from the untouched original
+        // and runs the same genuine neural learned LUT before style finishing.
+        polishedButton = Button(this).apply {
+            text = "Run Polished AI (v0.4.3)"
+            isAllCaps = false
+            textSize = 13f
+            minHeight = (48 * resources.displayMetrics.density).roundToInt()
+            setOnClickListener { runPolishedAI() }
+        }
+        root.addView(polishedButton, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            marginStart = pad / 4
+            marginEnd = pad / 4
+        })
+        val polishedRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        fun addPolishedChoice(label: String, preset: PolishedAIProcessor.Style): Button {
+            val button = Button(this).apply {
+                text = label
+                isAllCaps = false
+                textSize = 11f
+                minHeight = (40 * resources.displayMetrics.density).roundToInt()
+                setOnClickListener {
+                    polishedStyle = preset
+                    refreshPolishedButtons()
+                }
+            }
+            polishedRow.addView(button, LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            return button
+        }
+        polishNormalButton = addPolishedChoice(
+            "Polished", PolishedAIProcessor.Style.POLISHED)
+        polishPlusButton = addPolishedChoice(
+            "Polished+", PolishedAIProcessor.Style.POLISHED_PLUS)
+        polishWowButton = addPolishedChoice(
+            "Wow", PolishedAIProcessor.Style.WOW)
+        root.addView(polishedRow, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
+        refreshPolishedButtons()
         info = TextView(this).apply {
             text = "Choose a photo to start"
             gravity = Gravity.CENTER
@@ -367,6 +419,20 @@ class MainActivity : ComponentActivity() {
             detailStrength == LocalDetailProcessor.Strength.STRONG, "Strong")
     }
 
+    private fun refreshPolishedButtons() {
+        fun indicate(button: Button, selected: Boolean, label: String) {
+            button.text = if (selected) "✓ " + label else label
+            button.alpha = if (selected) 1f else 0.65f
+            button.isSelected = selected
+        }
+        indicate(polishNormalButton,
+            polishedStyle == PolishedAIProcessor.Style.POLISHED, "Polished")
+        indicate(polishPlusButton,
+            polishedStyle == PolishedAIProcessor.Style.POLISHED_PLUS, "Polished+")
+        indicate(polishWowButton,
+            polishedStyle == PolishedAIProcessor.Style.WOW, "Wow")
+    }
+
     private fun setBusy(busy: Boolean) {
         progress.visibility = if (busy) View.VISIBLE else View.GONE
         openButton.isEnabled = !busy
@@ -381,6 +447,10 @@ class MainActivity : ComponentActivity() {
         detailBalancedButton.isEnabled = !busy && original != null
         detailStrongButton.isEnabled = !busy && original != null
         detailAdaptiveButton.isEnabled = !busy && original != null
+        polishedButton.isEnabled = !busy && original != null
+        polishNormalButton.isEnabled = !busy && original != null
+        polishPlusButton.isEnabled = !busy && original != null
+        polishWowButton.isEnabled = !busy && original != null
         saveButton.isEnabled = !busy && corrected != null
     }
 
@@ -647,6 +717,66 @@ class MainActivity : ComponentActivity() {
                 errorMessage("Local Detail Lab failed", e)
             } finally {
                 detailProgressActive = false
+                setBusy(false)
+            }
+        }
+    }
+
+    /**
+     * Separate v0.4.3 actual-neural style path: pretrained learned 3D LUT
+     * plus graded polished/wow finish. Does not call or change old modes.
+     */
+    private fun runPolishedAI() {
+        val source = original ?: return
+        val preset = polishedStyle
+        scope.launch {
+            setBusy(true)
+            polishedProgressActive = true
+            sceneDiagnostics.visibility = View.VISIBLE
+            sceneDiagnostics.text = "Polished AI " + preset.label +
+                " • applying learned offline neural colour model…"
+            info.text = "Polished AI " + preset.label + " • starting…"
+            try {
+                val result = withContext(Dispatchers.Default) {
+                    PolishedAIProcessor.enhance(
+                        this@MainActivity, source, preset) { pct ->
+                        runOnUiThread {
+                            if (polishedProgressActive) {
+                                info.text = "Polished AI " + preset.label +
+                                    " • processing " + pct + "%"
+                            }
+                        }
+                    }
+                }
+                polishedProgressActive = false
+                corrected = result.bitmap
+                showOriginal = false
+                image.setImageBitmap(result.bitmap)
+                sceneDiagnostics.text = "Polished AI Lab v0.4.3" +
+                    " • " + result.style.label + "\n" +
+                    "Total: " + "%.1f".format(result.totalMs/1000.0) +
+                    "s • Neural inference: " +
+                    "%.1f".format(result.neuralMs/1000.0) + "s" +
+                    "\nAdjusted pixels: " +
+                    "%.1f".format(result.changedPercent) + "%" +
+                    " • Original / result luminance: " +
+                    "%.1f".format(result.beforeMeanY) + " → " +
+                    "%.1f".format(result.afterMeanY) +
+                    "\nClipping-risk pixels: " +
+                    "%.1f".format(result.clippedChannelPercent) + "%" +
+                    (if (result.darkSceneProtected)
+                        " • Night/black-background protection active" else "")
+                sceneDiagnostics.visibility = View.VISIBLE
+                info.text = "Polished AI " + preset.label +
+                    " complete — tap photo to compare"
+            } catch (e: Exception) {
+                polishedProgressActive = false
+                sceneDiagnostics.text = "Polished AI processing failed: " +
+                    (e.localizedMessage ?: e.javaClass.simpleName)
+                sceneDiagnostics.visibility = View.VISIBLE
+                errorMessage("Polished AI failed", e)
+            } finally {
+                polishedProgressActive = false
                 setBusy(false)
             }
         }

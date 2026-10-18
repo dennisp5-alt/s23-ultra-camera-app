@@ -6,11 +6,11 @@ android {
     namespace = "com.example.autophoto"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.example.autophoto.qualitylab.v042"
+        applicationId = "com.example.autophoto.polished.v043"
         minSdk = 29
         targetSdk = 35
         versionCode = 1
-        versionName = "0.4.2-adaptive-strong"
+        versionName = "0.4.3-polished-ai-lab"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

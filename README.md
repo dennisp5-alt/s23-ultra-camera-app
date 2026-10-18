@@ -1,30 +1,38 @@
-# AutoPhoto Quality Lab v0.4.2 — Adaptive Strong Detail
+# AutoPhoto Polished AI Lab v0.4.3 — Three-Look Offline Test
 
-A **separate offline experimental APK** for Samsung Galaxy S23 Ultra, branched from v0.4.1 commit `7d690756e8c22bb1fcefb94695b62936a1498a69`.
-Package ID `com.example.autophoto.qualitylab.v042`; earlier versions preserved.
+**New independent Android app:** `com.example.autophoto.polished.v043`. All earlier quality-lab and AutoPhoto versions are preserved. Based on the existing v0.4.2 source, at commit `df1c53c9a465156cab2aa344b3ad4ebdfba88771`.
 
-## New independent Adaptive Strong mode
+## Why this version
 
-Tap **Adaptive Strong Detail (v0.4.2)** to run from the untouched original decoded photograph.
+The user prefers a premium, polished, visually impressive finish and is willing to accept a slightly artificial look, then dial the intensity backward to the optimal balance. Natural capture fidelity is still available through the untouched **Auto** button.
 
-- Uses original **Strong gain** on credible local detail, with bilateral-like 5x5 confidence and native-resolution 3x3 texture reconstruction from actual pixels (no hallucination).
-- Extra **soft blue/pale upper-region confidence** to reduce sharp outlines against sky and clouds, especially poles/powerlines. It's a chromatic/spatial heuristic, **not trained sky segmentation**.
-- Extra **warm skin-like colour proximity** to preserve skin texture and smooth subject boundaries; **not face recognition or person segmentation**.
-- Smoothly attenuates corrections in high-risk areas, supplementing existing protection for saturation, natural bokeh, deep shadows and clipping.
-- Additional local 3x3 edge overshoot safeguard caps any newly created extrema to about 1.4–2.4/255 outside their original neighbourhood.
-- Reports average/max absolute luminance change, changed-pixel %, original vs output brightness, texture-mask coverage and how often the new safeguard limited a correction.
+## Three new looks
 
-## A/B controls and preservation
+Choose **Polished**, **Polished+** (default) or **Wow**, then press **Run Polished AI (v0.4.3)**. Every run starts from the untouched decoded source; the effects are **not stacked**.
 
-The existing three **Gentle / Balanced / Strong v0.4.1 presets remain unmodified** and can still be run through "Run Local Detail (v0.4.1 presets)". The newly selected default preset is **Strong**, matching user preference. The new Adaptive Strong button is a distinct route, not a replacement for the older buttons.
+The new mode uses **actual local/offline neural inference** via our existing pretrained `AlternativeAIProcessor.adaptiveLut` ONNX trained image classifier and three learned 3D LUT bases. It then adds a deterministic finishing pass:
 
-**Auto, MobileIE, Learned 3D LUT, Adaptive Masked AI, Semantic Person AI (ML Kit), and Scene Semantic AI (SegFormer)** are unmodified and bundled offline. All older APKs remain installable. This branch adds no external models/dependencies. Any references to scene guidance in Adaptive Strong mean colour/tone heuristics, not actual four-class semantic inference.
+1. Learned neural scene-dependent colour grading (blended 75%, 90% or 100%).
+2. S-shaped contrast and lift in the middle tones, with preserved deep black and gradual highlight protection.
+3. Selective, not blanket, vibrance; more boost for muted colours, less for highly saturated red, warm skin-like colours and near-white reflections.
+4. Edge-aware 512px bilateral-style tonal base and texture-confidence mask, interpolated into original full-resolution pixels for a measured detail-pop enhancement; preserve naturally blurred bokeh.
+5. Detect very dark scene histograms (e.g. fire against black) and restrict midtone/shadow lift. Stronger aesthetic processing must not brighten black backgrounds to grey.
+6. Report processed-pixel percentage, actual neural-inference time, total time, original/result image mean luminance and potential channel-clipping percentage.
 
-## Testing priorities
+This *finishing stage* is **not a generative model and does not reconstruct missing real details**; `Polished AI` denotes a real learned-LUT base with an additional stylized tone/color/detail finish. Warm-skin and sky/deep-shadow protections are photographic heuristics, **not** additional segmentation predictions.
 
-1. Bottlebrush flower: preserve red filaments, avoid bokeh hardening.
-2. Rooftops/powerlines: no bright sky/cable halos, clouds remain natural.
-3. People/inflatables/water: natural skin, real water ripples, no rough noise.
-4. Rose/portrait/park: highlight, hair, skin and distant-texture protection.
+### Regression guarantee
 
-Compare **Strong v0.4.1** vs **Adaptive Strong v0.4.2**, starting from the original for each. Run side-by-side saved JPG comparisons at the same scale. Claim quality improvement only after actual testing, not from percentage of pixels changed.
+All previously working buttons and processors — Auto, MobileIE, Learned 3D LUT, Adaptive Masked AI, Semantic Person AI, Scene Semantic AI, Gentle/Balanced/Strong and Adaptive Strong — are retained without changing their algorithms.
+
+### Acceptance tests on S23 Ultra
+
+- **Fire**: retain deep black without greying shadows, maintain orange flame colour and highlight structure.
+- **Sports group**: lively grass, readable jerseys, natural skin, no crushed shadows.
+- **Portrait and water**: clean skin and richer pink/blue clothing without neon halos or clipped reflections.
+- **Bottlebrush and rose**: vivid but not posterized reds/pinks; preserve individual filaments and folds.
+- **Rooftops/powerlines**: sky gradients without sharpening rings, cables remain authentic.
+
+Save all three looks from identical originals and compare with the original and Strong detail. Prefer subjective quality only after viewing actual A/B saved photographs at matching zoom. A model file in an APK and successful build-time tests do not prove subjective photo quality.
+
+GitHub Actions builds, validates pretrained models and publishes a direct downloadable APK GitHub Release at `autophoto-polished-lab-v0.4.3`.
