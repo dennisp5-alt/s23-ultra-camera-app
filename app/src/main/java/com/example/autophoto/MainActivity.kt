@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var aiButton: Button
     private lateinit var lutButton: Button
     private lateinit var maskedButton: Button
+    private lateinit var semanticButton: Button
     private lateinit var saveButton: Button
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -193,6 +194,20 @@ class MainActivity : ComponentActivity() {
             marginEnd = pad / 4
         })
 
+        semanticButton = Button(this).apply {
+            text = "Semantic Person AI (v0.3.7)"
+            isAllCaps = false
+            textSize = 13f
+            minHeight = (48 * resources.displayMetrics.density).roundToInt()
+            setOnClickListener { runSemanticAI() }
+        }
+        root.addView(semanticButton, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            marginStart = pad / 4
+            marginEnd = pad / 4
+        })
         info = TextView(this).apply {
             text = "Choose a photo to start"
             gravity = Gravity.CENTER
@@ -237,6 +252,7 @@ class MainActivity : ComponentActivity() {
         aiButton.isEnabled = !busy && original != null
         lutButton.isEnabled = !busy && original != null
         maskedButton.isEnabled = !busy && original != null
+        semanticButton.isEnabled = !busy && original != null
         saveButton.isEnabled = !busy && corrected != null
     }
 
@@ -335,6 +351,40 @@ class MainActivity : ComponentActivity() {
                     " • tap photo to compare"
             } catch (e: Exception) {
                 errorMessage("Masked AI failed", e)
+            } finally {
+                setBusy(false)
+            }
+        }
+    }
+
+    private fun runSemanticAI() {
+        val source = original ?: return
+        scope.launch {
+            setBusy(true)
+            info.text = "Semantic AI • offline person segmentation…"
+            try {
+                val output = withContext(Dispatchers.Default) {
+                    MaskedAIProcessor.enhanceSemantic(
+                        this@MainActivity, source) { percent ->
+                        runOnUiThread {
+                            info.text = "Semantic AI • processing " + percent + "%"
+                        }
+                    }
+                }
+                corrected = output.bitmap
+                showOriginal = false
+                image.setImageBitmap(output.bitmap)
+                val total = output.totalMillis / 1000.0
+                val seg = output.personInferenceMs / 1000.0
+                val status = if (output.personMaskActive) {
+                    "Person mask active (" +
+                        "%.1f".format(output.personMaskCoverage * 100f) + "%)"
+                } else output.personStatus
+                info.text = "Semantic AI • " + "%.1f".format(total) +
+                    "s • " + status + " • segmentation " +
+                    "%.1f".format(seg) + "s • tap photo to compare"
+            } catch (e: Exception) {
+                errorMessage("Semantic AI failed", e)
             } finally {
                 setBusy(false)
             }

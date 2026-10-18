@@ -1,7 +1,7 @@
-name: Build AutoPhoto Alternative AI Lab v0.3.6
+name: Build AutoPhoto Alternative AI Lab v0.3.7
 on:
   push:
-    branches: [autophoto-ai-masked-v036]
+    branches: [autophoto-ai-semantic-v037]
   workflow_dispatch:
 permissions:
   contents: read
@@ -40,7 +40,7 @@ jobs:
           import zipfile,pathlib
           apk=next(pathlib.Path("app/build/outputs/apk/debug").glob("*.apk"))
           with zipfile.ZipFile(apk) as z:
-              for name in ["assets/mobileie_lolv1.tflite","assets/lut_classifier.onnx","assets/lut_basis_33.bin"]:
+              for name in ["assets/mobileie_lolv1.tflite","assets/lut_classifier.onnx","assets/lut_basis_33.bin","assets/mediapipe_person_segmentation.tflite"]:
                   item=z.getinfo(name)
                   print(name, item.file_size,"bytes")
                   assert item.file_size>10000
@@ -49,6 +49,6 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AutoPhoto-AI-Lab-v0.3.6-APK
+          name: AutoPhoto-AI-Lab-v0.3.7-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error

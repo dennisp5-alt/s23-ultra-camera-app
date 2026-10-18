@@ -1,24 +1,25 @@
-# AutoPhoto AI Lab v0.3.6 — Adaptive Masked Refinement
+# AutoPhoto AI Lab v0.3.7 — Offline person-semantic masked enhancement
 
-This is a new **separately installable offline Android experiment** for Samsung Galaxy S23 Ultra.
+Separate installable experiment (package `com.example.autophoto.alternatives.v037`), branching from known-good v0.3.6. Prior versions and the original Auto pipeline are not modified.
 
-**Distinct package:** `com.example.autophoto.alternatives.v036`; all v0.3.5 and previous APKs remain installable. Auto, independent MobileIE and independent Learned 3D LUT are preserved unchanged from the working v0.3.5 source.
+### All five correction modes
+- **Auto:** unchanged.
+- **MobileIE:** original pretrained low-light TensorFlow Lite pipeline, unchanged.
+- **Learned 3D LUT:** original pretrained ONNX classifier and learned LUT basis, unchanged.
+- **Adaptive Masked AI:** v0.3.6 confidence-weighted multiple-mask algorithm, unchanged when this button is used.
+- **Semantic Person AI (new):** adds Google MediaPipe general person segmentation model (256×256 float32, pretrained) to the previous two real neural output engines. A person-confidence mask differentiates reliable human foreground from background. Uses modest, exposure-only person-local brightening, avoids skin-hue editing, preserves boundaries and texture and maintains original-image QC. When detection is not confident, reports "no confident person mask" and proceeds with the existing tonal workflow plus conservative scene-proxy corrections.
 
-## New Adaptive Masked AI mode
+### Limitations and honesty
+- **Only people** are genuinely semantically segmented by an additional neural network. The person's mask is optimized for selfies and medium-distance people: small groups and partially obscured subjects may not be identified; app reports the outcome. The model's *presence* in the APK does not guarantee successful segmentation on this particular photo.
+- **Sky, foliage, water and haze** are **not** separate pretrained segmentation classes. These are explicitly conservative estimates from colour, luminance, texture and image location, not reliable object recognition. Water-like low-contrast zones receive a small local contrast adjustment rather than aggressive brightness lift; this is **not learned dehazing or texture reconstruction**.
+- Two original pretrained engines run once each. Person inference adds another small model and may take extra seconds but not minutes on most supported devices; this is not yet benchmarked on an actual Galaxy S23 Ultra.
+- The new segmentation is used **only in the Semantic Person AI button**. The existing v0.3.6 masked mode should behave the same as previously.
 
-1. **Neural predictions:** Perform actual pretrained MobileIE low-light TensorFlow Lite inference once, and actual pretrained image-adaptive 3D-LUT ONNX classification and learned LUT interpolation once. Model weights and their input resolutions remain unchanged.
-2. **Regional analysis:** Compare original and both real neural output images on a 640px analysis grid; build overlapping *soft tonal and colour* masks for deep shadows, bright highlights, pink/sensitive warm tones, green foliage-like colours and local contrast boundaries. These are NOT object labels or semantic person/flower segmentation.
-3. **Confidence-weighted selection:** The less plausible an engine's colour/brightness shift, the less it influences that area. Model agreement, dark-background/bright-subject identification, local gradients, and scene exposure adjust the mobile/LUT mixture per region. The source image remains the conservative reference.
-4. **Two-pass edge-aware feathering:** smooth model weights along tonal regions to prevent sharp-edged masks while reducing excessive bleeding across contrast boundaries.
-5. **Native-size first blend:** combine the model outputs at photo resolution, with shadow, clipping, colour-shift and highlight safeguards.
-6. **Quality-control second pass:** compare preliminary output against original again; reduce potentially unnatural tone shifts in deep-black regions, highlights and strong detail boundaries; protect the original RGB texture rather than performing aggressive sharpening.
+### Sources and offline handling
+The official Google MediaPipe `selfie_segmentation.tflite` model is downloaded **at CI build time only** from `https://storage.googleapis.com/mediapipe-assets/selfie_segmentation.tflite`, with tensor dimensions and format checked before APK compilation. This pretrained model and the existing official models are bundled inside the Android APK. The installed application uses no network connection.
+- MediaPipe: https://github.com/google-ai-edge/mediapipe
+- MobileIE: https://github.com/AVC2-UESTC/MobileIE
+- Learned LUT: https://github.com/HuiZeng/Image-Adaptive-3DLUT
 
-The application shows timing for both neural inferences and total duration. The regional masking and QC passes will add some processing time compared with v0.3.5, intentionally prioritizing natural photographic quality.
-
-## What this version does *not* do
-
-No semantic object segmentation or object-specific AI recognition, no separately trained mask network, no invented scene content, and no guarantee of superior results across photographs. The existing training domain of each model is unchanged. Test on identical rose, foliage, backlit subjects, skies, and low-light photos.
-
-Official pretrained source models are fetched during CI builds only, packed in the APK and used completely offline:
-- https://github.com/AVC2-UESTC/MobileIE
-- https://github.com/HuiZeng/Image-Adaptive-3DLUT
+### Quality tests
+Use the same rose, portrait, and landscape images to compare v0.3.6 masked vs v0.3.7 semantic. Read the displayed person-mask status, coverage and processing time. Observe natural skin texture, sky brightness, lower-water haze and foliage colour; do not infer model correctness from brightening alone.

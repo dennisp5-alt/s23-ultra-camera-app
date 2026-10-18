@@ -26,7 +26,11 @@ object MaskedAIProcessor {
         val mobileInferenceMs: Long,
         val lutInferenceMs: Long,
         val totalMillis: Long,
-        val lowLightScene: Boolean
+        val lowLightScene: Boolean,
+        val personMaskActive: Boolean = false,
+        val personMaskCoverage: Float = 0f,
+        val personInferenceMs: Long = 0,
+        val personStatus: String = "Not requested"
     )
 
     private const val MASK_MAX_EDGE = 640
@@ -106,7 +110,29 @@ object MaskedAIProcessor {
         return result
     }
 
-    fun enhance(context: Context, src: Bitmap, progress: (Int) -> Unit): Report {
+    /**
+     * A separate semantic experiment. The existing `enhance` path is invoked
+     * unchanged when the app's old "Adaptive Masked AI" button is tapped.
+     * Person segmentation may be absent on distant/occluded subjects.
+     */
+    fun enhanceSemantic(context: Context, src: Bitmap, progress: (Int) -> Unit): Report {
+        progress(1)
+        val person = PersonSegmentation.infer(context, src)
+        progress(12)
+        val result = enhance(context, src, { pct ->
+            progress(12 + (pct * 88 / 100).coerceIn(0, 88))
+        }, person)
+        return result.copy(
+            personMaskActive = person.detected,
+            personMaskCoverage = person.coverage,
+            personInferenceMs = person.elapsedMillis,
+            personStatus = person.note,
+            totalMillis = result.totalMillis + person.elapsedMillis
+        )
+    }
+
+    fun enhance(context: Context, src: Bitmap, progress: (Int) -> Unit,
+                semantic: PersonSegmentation.Result? = null): Report {
         val start = SystemClock.elapsedRealtime()
         progress(1)
 
@@ -160,6 +186,16 @@ object MaskedAIProcessor {
             val mobileMask = FloatArray(pixels.size)
             val lutMask = FloatArray(pixels.size)
             val detailMask = FloatArray(pixels.size)
+
+            // Soft person/background neural segmentation. Sky, foliage and
+            // water below are only *tonal/colour/position candidates* — never
+            // asserted as pixel-accurate object classes.
+            val personRaw = if (semantic?.mask != null)
+                FloatArray(pixels.size) else null
+            val skyRaw = if (semantic != null) FloatArray(pixels.size) else null
+            val hazeRaw = if (semantic != null) FloatArray(pixels.size) else null
+            val neighborhood = if (semantic != null)
+                FloatArray(pixels.size) else null
             val darkBackgroundWithSubject = p50 < 54 && p90 > 108
 
             fun modelTrust(base: Int, predicted: Int, originalY: Float,
@@ -209,6 +245,42 @@ object MaskedAIProcessor {
                     val downY = luma[min(y + 1, h - 1) * w + x]
                     val edge = ease(max(abs(lum - rightY), abs(lum - downY)) / 42f)
                     detailMask[i] = edge
+                    val person = if (personRaw != null) {
+                        val mx = (x + 0.5f) * PersonSegmentation.SIDE / w - 0.5f
+                        val my = (y + 0.5f) * PersonSegmentation.SIDE / h - 0.5f
+                        val confidence = sample(semantic!!.mask!!,
+                            PersonSegmentation.SIDE, PersonSegmentation.SIDE, mx, my)
+                        // Avoid abrupt people/background cutouts: segmentation
+                        // confidence converted to a gradual blending weight.
+                        ease((confidence - 0.23f) / 0.58f)
+                    } else 0f
+                    personRaw?.set(i, person)
+                    val sat = (max(r, max(g, b)) - min(r, min(g, b))) /
+                        max(40f, max(r, max(g, b)))
+                    val upper = 1f - ease((y.toFloat()/h - 0.19f)/0.24f)
+                    val paleBlueGray = (1f-ease((sat-0.07f)/0.23f)) *
+                        ease((lum - 154f)/67f) *
+                        (1f-ease((r-b-28f)/40f))
+                    val skyCandidate = upper * paleBlueGray * (1f-person)
+                    skyRaw?.set(i, skyCandidate)
+                    val lower = ease((y.toFloat()/h - 0.53f)/0.25f)
+                    // Conservative low-texture gray-blue region estimate —
+                    // not a trained water detector.
+                    val lowTexture = 1f - ease((max(abs(lum-rightY),
+                        abs(lum-downY))-5f)/30f)
+                    val grayTone = (1f-ease((sat-0.11f)/0.21f)) *
+                        ease((lum-40f)/55f) *
+                        (1f-ease((lum-201f)/47f))
+                    hazeRaw?.set(i, lower * lowTexture * grayTone *
+                        (1f-person) * (1f-skyCandidate))
+                    if (neighborhood != null) {
+                        // Small local luminance average to guide *very small*
+                        // contrast recovery in flat, misty-looking regions.
+                        val left = luma[y*w+max(0,x-1)]
+                        val above = luma[max(0,y-1)*w+x]
+                        neighborhood[i] = (lum*4f + rightY + downY +
+                            left + above) / 8f
+                    }
 
                     val mobileY = luminance(mobilePixels[i])
                     val lutY = luminance(lutPixels[i])
@@ -240,11 +312,20 @@ object MaskedAIProcessor {
                     val focus = 1f - 0.16f * edge
                     val sceneFactor = if (darkBackgroundWithSubject &&
                         black > 0.65f) 0.35f else 1f
+                    // In the experimental semantic path favour trustworthy
+                    // subject-local corrections while keeping identified sky
+                    // and low-texture water-like backgrounds more restrained.
+                    val scenicProtection = if (semantic != null)
+                        (1f - 0.55f*(skyRaw?.get(i) ?: 0f) -
+                            0.24f*(hazeRaw?.get(i) ?: 0f))
+                            .coerceIn(0.30f, 1f) else 1f
                     mobileMask[i] = (mobilePreference * mobileTrust *
-                        confidence * focus * sceneFactor)
+                        confidence * focus * sceneFactor * scenicProtection *
+                        (1f + 0.22f*person))
                         .coerceIn(0f, 0.68f)
                     lutMask[i] = (lutPreference * lutTrust *
-                        confidence * focus * sceneFactor)
+                        confidence * focus * sceneFactor * scenicProtection *
+                        (1f + 0.30f*person))
                         .coerceIn(0f, 0.83f)
                 }
             }
@@ -258,6 +339,11 @@ object MaskedAIProcessor {
             val softLut = smoothEdgeAware(
                 smoothEdgeAware(lutMask, luma, w, h), luma, w, h)
             val softDetail = smoothEdgeAware(detailMask, luma, w, h)
+            val softPerson = personRaw?.let {
+                smoothEdgeAware(smoothEdgeAware(it,luma,w,h),luma,w,h)
+            }
+            val softSky = skyRaw?.let { smoothEdgeAware(it,luma,w,h) }
+            val softHaze = hazeRaw?.let { smoothEdgeAware(it,luma,w,h) }
             progress(82)
 
             // Final native-resolution compositing and safeguards, row-by-row
@@ -374,6 +460,12 @@ object MaskedAIProcessor {
                         val safetyBlend = (0.14f * edge +
                             0.37f * highlight + 0.31f * deepBlack)
                             .coerceIn(0f, 0.67f)
+                        val person = if (softPerson != null)
+                            sample(softPerson,w,h,mx,maskY) else 0f
+                        val sky = if (softSky != null)
+                            sample(softSky,w,h,mx,maskY) else 0f
+                        val waterLike = if (softHaze != null)
+                            sample(softHaze,w,h,mx,maskY) else 0f
                         val proposedY = currentY - originalY
                         val maxRise = min(
                             if (lowLight) 21f else 15f,
@@ -390,9 +482,31 @@ object MaskedAIProcessor {
                         fun finalChannel(base: Float, delta: Float): Int =
                             (base + (delta - excess) * (1f - safetyBlend))
                                 .roundToInt().coerceIn(0, 255)
-                        val fr = finalChannel(r, redDelta)
-                        val fg = finalChannel(g, greenDelta)
-                        val fb = finalChannel(b, blueDelta)
+                        // Independently exposure-balance underexposed subject
+                        // regions when confident person segmentation exists.
+                        // Same addition to RGB channels preserves skin hue.
+                        val subjectLift = if (semantic != null)
+                            (3.7f*person*ease((originalY-26f)/48f) *
+                                (1f-ease((originalY-123f)/73f)) *
+                                (1f-highlight) *
+                                (1f - ease((max(r,max(g,b))-239f)/12f)))
+                                .coerceIn(0f,3.7f) else 0f
+                        // Very small local contrast for low-texture background
+                        // regions (not a generative dehaze operation).
+                        val atmosphericContrast = if (neighborhood != null) {
+                            val local = sample(neighborhood,w,h,mx,maskY)
+                            ((originalY-local)*0.22f*waterLike*
+                                (1f-person)*(1f-sky)).coerceIn(-2.3f,2.3f)
+                        } else 0f
+                        val finalTone = (subjectLift+atmosphericContrast)
+                            .coerceIn(-2.3f,
+                                (250f - max(r,max(g,b))).coerceAtLeast(0f))
+                        val fr = (finalChannel(r, redDelta)+finalTone)
+                            .roundToInt().coerceIn(0,255)
+                        val fg = (finalChannel(g, greenDelta)+finalTone)
+                            .roundToInt().coerceIn(0,255)
+                        val fb = (finalChannel(b, blueDelta)+finalTone)
+                            .roundToInt().coerceIn(0,255)
                         candidateRow[i] = (alpha shl 24) or
                             (fr shl 16) or (fg shl 8) or fb
                     }
