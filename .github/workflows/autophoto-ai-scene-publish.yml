@@ -1,0 +1,61 @@
+name: Publish AutoPhoto v0.3.9 APK Direct Download
+on:
+  push:
+    branches: [autophoto-ai-scene-v039]
+    paths: [.github/workflows/autophoto-ai-scene-publish.yml]
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download verified successful v0.3.9 APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: AutoPhoto-AI-Lab-v0.3.9-APK
+          repository: ${{ github.repository }}
+          run-id: 39112404199
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: publish
+      - name: Verify and rename downloaded APK
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import pathlib,zipfile,hashlib
+          p=list(pathlib.Path("publish").glob("*.apk"))
+          assert len(p)==1, f"Expected one APK, got {p}"
+          target=pathlib.Path("publish/AutoPhoto_AI_Lab_v0.3.9_Scene_Semantic_AI.apk")
+          if p[0]!=target: p[0].rename(target)
+          with zipfile.ZipFile(target) as z:
+              for model in (
+                  "assets/mobileie_lolv1.tflite",
+                  "assets/lut_classifier.onnx",
+                  "assets/lut_basis_33.bin",
+                  "assets/skywater_segformer_b2_fp32.onnx"):
+                  assert z.getinfo(model).file_size>10000
+          h=hashlib.sha256()
+          with target.open("rb") as f:
+              for block in iter(lambda: f.read(1024*1024), b""): h.update(block)
+          print("Verified APK bytes",target.stat().st_size)
+          print("APK SHA256",h.hexdigest())
+          assert h.hexdigest()=="91fedf10f8184a99b476cfeac2613222838657d05f897f87b81de94aa4adca93"
+          PY
+      - name: Publish stable direct-download GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: autophoto-ai-lab-v0.3.9
+          target_commitish: autophoto-ai-scene-v039
+          name: AutoPhoto AI Lab v0.3.9 — Offline Scene Semantic AI
+          make_latest: false
+          generate_release_notes: false
+          body: |
+            Offline AutoPhoto AI Lab v0.3.9 for Samsung S23 Ultra.
+            Separate app; previous working versions are preserved.
+            Includes scene-semantic sky/water/person model, MobileIE, learned LUT, Auto, and masked enhancement.
+            Direct APK download (debug-signed). Approx. 258 MiB.
+            SHA-256: 91fedf10f8184a99b476cfeac2613222838657d05f897f87b81de94aa4adca93
+          files: publish/AutoPhoto_AI_Lab_v0.3.9_Scene_Semantic_AI.apk
+          fail_on_unmatched_files: true
+          overwrite_files: true
