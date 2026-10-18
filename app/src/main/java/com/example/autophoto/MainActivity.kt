@@ -52,6 +52,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var lutButton: Button
     private lateinit var maskedButton: Button
     private lateinit var semanticButton: Button
+    private lateinit var sceneButton: Button
     private lateinit var saveButton: Button
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -208,6 +209,20 @@ class MainActivity : ComponentActivity() {
             marginStart = pad / 4
             marginEnd = pad / 4
         })
+        sceneButton = Button(this).apply {
+            text = "Scene Semantic AI (v0.3.9)"
+            isAllCaps = false
+            textSize = 13f
+            minHeight = (48 * resources.displayMetrics.density).roundToInt()
+            setOnClickListener { runSceneAI() }
+        }
+        root.addView(sceneButton, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            marginStart = pad / 4
+            marginEnd = pad / 4
+        })
         info = TextView(this).apply {
             text = "Choose a photo to start"
             gravity = Gravity.CENTER
@@ -253,6 +268,7 @@ class MainActivity : ComponentActivity() {
         lutButton.isEnabled = !busy && original != null
         maskedButton.isEnabled = !busy && original != null
         semanticButton.isEnabled = !busy && original != null
+        sceneButton.isEnabled = !busy && original != null
         saveButton.isEnabled = !busy && corrected != null
     }
 
@@ -385,6 +401,41 @@ class MainActivity : ComponentActivity() {
                     "%.1f".format(seg) + "s • tap photo to compare"
             } catch (e: Exception) {
                 errorMessage("Semantic AI failed", e)
+            } finally {
+                setBusy(false)
+            }
+        }
+    }
+
+    private fun runSceneAI() {
+        val source = original ?: return
+        scope.launch {
+            setBusy(true)
+            info.text = "Scene AI • analysing sky, water and people offline…"
+            try {
+                val result = withContext(Dispatchers.Default) {
+                    MaskedAIProcessor.enhanceScene(
+                        this@MainActivity, source) { percent ->
+                        runOnUiThread {
+                            info.text = "Scene AI • processing " + percent + "%"
+                        }
+                    }
+                }
+                corrected = result.bitmap
+                showOriginal = false
+                image.setImageBitmap(result.bitmap)
+                val total = result.totalMillis / 1000.0
+                val seg = result.sceneSegmentationMs / 1000.0
+                val regions = if (result.sceneStatus.contains("active")) {
+                    "Sky " + "%.0f".format(result.skyCoverage * 100f) +
+                    "% • Water " + "%.0f".format(result.waterCoverage * 100f) +
+                    "% • People " + "%.0f".format(result.personMaskCoverage * 100f) + "%"
+                } else result.sceneStatus
+                info.text = "Scene AI • " + "%.1f".format(total) +
+                    "s total • semantic " + "%.1f".format(seg) +
+                    "s • " + regions + " • tap photo to compare"
+            } catch (e: Exception) {
+                errorMessage("Scene AI failed", e)
             } finally {
                 setBusy(false)
             }

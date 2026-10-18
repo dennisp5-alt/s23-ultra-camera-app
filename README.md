@@ -1,20 +1,31 @@
-# AutoPhoto AI Lab v0.3.8 — Fixed Offline Person Segmentation
+# AutoPhoto AI Lab v0.3.9 — Offline Sky / Water / Person Segmentation
 
-This is a **separate experimental Android application** for the Samsung Galaxy S23 Ultra. Package `com.example.autophoto.alternatives.v038` installs alongside previous v0.3.7/v0.3.6 and all existing Auto and camera apps.
+This is a **separate experimental** offline Android app for the Samsung Galaxy S23 Ultra, using app ID `com.example.autophoto.alternatives.v039`. It installs alongside all earlier variants, especially the known-good v0.3.8 and v0.3.6.
 
-## Root cause fixed
-v0.3.7 downloaded the official raw MediaPipe `selfie_segmentation.tflite` and attempted to load it with TensorFlow Lite's generic Java Interpreter. That model contains `Convolution2DTransposeBias`, a **custom operator** which is registered in MediaPipe's custom-op resolver but unavailable to generic TensorFlow Lite Java. The original build verified the *shape and packaging* of the model, not that Android could execute it. Consequently v0.3.7 showed "Person model unavailable — tonal fallback" in every test, irrespective of the size of the person.
+## All existing modes retained
+- Auto: exact known-good processing, unchanged.
+- MobileIE: existing real TensorFlow Lite low-light inference, unchanged.
+- Learned 3D LUT: existing real ONNX scene-colour model plus trained 3D LUT bases, unchanged.
+- Adaptive Masked AI: original confidence-weighted tonal mask passes, unchanged.
+- Semantic Person AI: existing working v0.3.8 bundled ML Kit person segmentation, unchanged.
 
-v0.3.8 uses the actual bundled `com.google.mlkit:segmentation-selfie:16.0.0-beta6` Android SDK with `SINGLE_IMAGE_MODE`. This includes a compatible offline person segmentation model and runtime **within the installed APK**, rather than downloading a model at runtime. The Android manifest does not request Internet permission.
+## NEW: Scene Semantic AI (v0.3.9)
+Runs a **separate, genuinely pretrained** SegFormer B2 segmentation ONNX model, classes 0=background, 1=sky, 2=water, 3=person. On Android the float32 ONNX model runs in ONNX Runtime CPU, without a network connection. The official model is trained on ADE20K and released by Vincent Qin / Realcat as MIT licensed:
 
-## Processing
-- **Auto, MobileIE, Learned 3D LUT and Adaptive Masked AI:** v0.3.6 implementations maintained unchanged.
-- **Semantic Person AI:** Uses ML Kit's local trained model for soft person/background segmentation and the existing v0.3.7 semantic-aware masked blending and gentle person-specific exposure enhancement. Subtle conservative colour-and-tone proxies for sky/water-like regions remain.
-- **Fallback:** When the segmenter returns insufficient confidence, shows "No confident person detected" rather than "model unavailable." If it actually throws, show the precise failure stage and exception in the app's status for diagnostic follow-up.
-- **Performance:** Reports total processing time, segmentation time and the model's person-pixel coverage, when detected.
+- Source: https://github.com/Vincentqyw/skywater_seg
+- Weights: https://huggingface.co/Realcat/skywater_seg
+- Exact model: `skywater_segformer_b2_fp32.onnx` (~99 MB)
 
-This is **not** complete scene segmentation. Distant people, partly obscured people and unusual angles may not be detected. Grass, sky and water are still handled by conservative colour/tone/texture heuristics. Avoid claiming pixel-perfect sky/water masks or restoration of missing detail.
+The model is downloaded **only by GitHub Actions at APK build time**. Our build pipeline installs ONNX Runtime Python and performs real CPU inference on the trained model to validate shape and operator compatibility before packaging. In-app ONNX Runtime Android uses the same pretrained ONNX weights via its CPU backend.
 
-Test first on the supplied close portrait, then the smaller people in the park landscape. If the close portrait reports an error, provide a screenshot of the new detailed status line. The compiled APK validates code and dependencies; **real on-device inference still requires user testing**.
+On-device processing:
+1. Download-free, offline four-class segmentation at 384×384, softmax confidence masks for sky/water/person.
+2. Genuine MobileIE and pretrained image-adaptive LUT models run once.
+3. Scene masks guide the existing confidence-weighted feathered regional corrections. Sky brightness is guarded; water is not indiscriminately brightened; any water local-contrast boost is minimal and is based on existing recorded detail. Person pixels can receive restrained exposure correction while retaining original colours.
+4. Full-resolution second-pass quality check rejects excessive changes.
+5. Display actual processing time, segmentation time, and mask coverage for sky/water/people.
 
-Official implementation: https://developers.google.com/ml-kit/vision/selfie-segmentation/android
+## Cautions
+The segmentation network is more complex than our two small AI engines and may add significant CPU processing time on the Galaxy S23 Ultra. Its published benchmark speed is from a desktop/GPU environment, **not** the S23 Ultra. The model does not label grass, trees, buildings or animals; green foliage remains heuristic. Scene detection may fail, especially for distant people. If ONNX initialization or segmentation fails, the new mode reports the reason and falls back to existing tonal masks. It never attempts to generate missing image content or extract impossible details from haze.
+
+Test with the supplied portrait (close subject), landscape (distant people, pond water, pale sky), and rose photos; compare v0.3.9 with v0.3.8 and v0.3.6 rather than assuming the extra model must improve every image.

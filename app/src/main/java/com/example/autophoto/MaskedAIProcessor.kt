@@ -30,7 +30,11 @@ object MaskedAIProcessor {
         val personMaskActive: Boolean = false,
         val personMaskCoverage: Float = 0f,
         val personInferenceMs: Long = 0,
-        val personStatus: String = "Not requested"
+        val personStatus: String = "Not requested",
+        val skyCoverage: Float = 0f,
+        val waterCoverage: Float = 0f,
+        val sceneSegmentationMs: Long = 0,
+        val sceneStatus: String = "Not requested"
     )
 
     private const val MASK_MAX_EDGE = 640
@@ -131,8 +135,30 @@ object MaskedAIProcessor {
         )
     }
 
+    /** Experimental real four-class sky/water/person scene segmentation. */
+    fun enhanceScene(context: Context, src: Bitmap,
+                     progress: (Int) -> Unit): Report {
+        progress(1)
+        val scene = SceneSegmentation.infer(context, src)
+        progress(15)
+        val result = enhance(context, src, scene = scene) { pct ->
+            progress(15 + (pct * 85 / 100).coerceIn(0, 85))
+        }
+        return result.copy(
+            skyCoverage = scene.skyCoverage,
+            waterCoverage = scene.waterCoverage,
+            personMaskActive = scene.detected &&
+                scene.personCoverage >= 0.004f,
+            personMaskCoverage = scene.personCoverage,
+            sceneSegmentationMs = scene.elapsedMillis,
+            sceneStatus = scene.note,
+            totalMillis = result.totalMillis + scene.elapsedMillis
+        )
+    }
+
     fun enhance(context: Context, src: Bitmap,
                 semantic: PersonSegmentation.Result? = null,
+                scene: SceneSegmentation.Result? = null,
                 progress: (Int) -> Unit): Report {
         val start = SystemClock.elapsedRealtime()
         progress(1)
@@ -191,11 +217,13 @@ object MaskedAIProcessor {
             // Soft person/background neural segmentation. Sky, foliage and
             // water below are only *tonal/colour/position candidates* — never
             // asserted as pixel-accurate object classes.
-            val personRaw = if (semantic?.mask != null)
+            val personRaw = if (semantic?.mask != null ||
+                scene?.person != null) FloatArray(pixels.size) else null
+            val skyRaw = if (semantic != null || scene != null)
                 FloatArray(pixels.size) else null
-            val skyRaw = if (semantic != null) FloatArray(pixels.size) else null
-            val hazeRaw = if (semantic != null) FloatArray(pixels.size) else null
-            val neighborhood = if (semantic != null)
+            val hazeRaw = if (semantic != null || scene != null)
+                FloatArray(pixels.size) else null
+            val neighborhood = if (semantic != null || scene != null)
                 FloatArray(pixels.size) else null
             val darkBackgroundWithSubject = p50 < 54 && p90 > 108
 
@@ -246,10 +274,16 @@ object MaskedAIProcessor {
                     val downY = luma[min(y + 1, h - 1) * w + x]
                     val edge = ease(max(abs(lum - rightY), abs(lum - downY)) / 42f)
                     detailMask[i] = edge
-                    val person = if (personRaw != null) {
+                    val person = if (scene?.person != null && personRaw != null) {
+                        val sx = (x + 0.5f) * scene.width / w - 0.5f
+                        val sy = (y + 0.5f) * scene.height / h - 0.5f
+                        val confidence = sample(scene.person, scene.width,
+                            scene.height, sx, sy)
+                        ease((confidence - 0.35f) / 0.56f)
+                    } else if (personRaw != null && semantic?.mask != null) {
                         val mx = (x + 0.5f) * PersonSegmentation.SIDE / w - 0.5f
                         val my = (y + 0.5f) * PersonSegmentation.SIDE / h - 0.5f
-                        val confidence = sample(semantic!!.mask!!,
+                        val confidence = sample(semantic.mask,
                             PersonSegmentation.SIDE, PersonSegmentation.SIDE, mx, my)
                         // Avoid abrupt people/background cutouts: segmentation
                         // confidence converted to a gradual blending weight.
@@ -262,7 +296,12 @@ object MaskedAIProcessor {
                     val paleBlueGray = (1f-ease((sat-0.07f)/0.23f)) *
                         ease((lum - 154f)/67f) *
                         (1f-ease((r-b-28f)/40f))
-                    val skyCandidate = upper * paleBlueGray * (1f-person)
+                    val skyCandidate = if (scene?.sky != null) {
+                        val sx = (x + 0.5f) * scene.width / w - 0.5f
+                        val sy = (y + 0.5f) * scene.height / h - 0.5f
+                        ease((sample(scene.sky,scene.width,scene.height,sx,sy)
+                            -0.37f)/0.55f) * (1f-person)
+                    } else upper * paleBlueGray * (1f-person)
                     skyRaw?.set(i, skyCandidate)
                     val lower = ease((y.toFloat()/h - 0.53f)/0.25f)
                     // Conservative low-texture gray-blue region estimate —
@@ -272,8 +311,15 @@ object MaskedAIProcessor {
                     val grayTone = (1f-ease((sat-0.11f)/0.21f)) *
                         ease((lum-40f)/55f) *
                         (1f-ease((lum-201f)/47f))
-                    hazeRaw?.set(i, lower * lowTexture * grayTone *
-                        (1f-person) * (1f-skyCandidate))
+                    val waterCandidate = if (scene?.water != null) {
+                        val sx = (x + 0.5f) * scene.width / w - 0.5f
+                        val sy = (y + 0.5f) * scene.height / h - 0.5f
+                        ease((sample(scene.water,scene.width,scene.height,
+                            sx,sy)-0.32f)/0.58f) * (1f-person) *
+                            (1f-skyCandidate)
+                    } else lower * lowTexture * grayTone *
+                        (1f-person) * (1f-skyCandidate)
+                    hazeRaw?.set(i, waterCandidate)
                     if (neighborhood != null) {
                         // Small local luminance average to guide *very small*
                         // contrast recovery in flat, misty-looking regions.
@@ -316,7 +362,7 @@ object MaskedAIProcessor {
                     // In the experimental semantic path favour trustworthy
                     // subject-local corrections while keeping identified sky
                     // and low-texture water-like backgrounds more restrained.
-                    val scenicProtection = if (semantic != null)
+                    val scenicProtection = if (semantic != null || scene != null)
                         (1f - 0.55f*(skyRaw?.get(i) ?: 0f) -
                             0.24f*(hazeRaw?.get(i) ?: 0f))
                             .coerceIn(0.30f, 1f) else 1f
@@ -486,7 +532,7 @@ object MaskedAIProcessor {
                         // Independently exposure-balance underexposed subject
                         // regions when confident person segmentation exists.
                         // Same addition to RGB channels preserves skin hue.
-                        val subjectLift = if (semantic != null)
+                        val subjectLift = if (semantic != null || scene != null)
                             (3.7f*person*ease((originalY-26f)/48f) *
                                 (1f-ease((originalY-123f)/73f)) *
                                 (1f-highlight) *
@@ -499,7 +545,14 @@ object MaskedAIProcessor {
                             ((originalY-local)*0.22f*waterLike*
                                 (1f-person)*(1f-sky)).coerceIn(-2.3f,2.3f)
                         } else 0f
-                        val finalTone = (subjectLift+atmosphericContrast)
+                        // Trained water masks selectively protect brightness,
+                        // while gently increasing *existing* local contrast.
+                        // Clipping and native detail safety remain hard limits.
+                        val waterConservation = if (scene?.water != null)
+                            (1f - 0.42f*waterLike).coerceIn(0.50f,1f)
+                            else 1f
+                        val finalTone = (subjectLift +
+                            atmosphericContrast*waterConservation)
                             .coerceIn(-2.3f,
                                 (250f - max(r,max(g,b))).coerceAtLeast(0f))
                         val fr = (finalChannel(r, redDelta)+finalTone)
