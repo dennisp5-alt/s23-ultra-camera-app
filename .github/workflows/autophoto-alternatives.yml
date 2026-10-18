@@ -1,7 +1,7 @@
-name: Build AutoPhoto Polished Impact v0.4.4
+name: Build AutoPhoto Selective Wow v0.4.5
 on:
   push:
-    branches: [autophoto-polished-impact-v044]
+    branches: [autophoto-polished-selective-v045]
   workflow_dispatch:
 permissions:
   contents: write
@@ -76,7 +76,7 @@ jobs:
           assert "fun enhanceAdaptiveStrong(" in p
           assert "localMinimumY" in p and "skinGuide" in p and "skyGuide" in p
           assert all(t in ui for t in ["ImageProcessor.correct(input)", "MaskedAIProcessor.enhanceScene", "detailProgressActive = false"])
-          assert "applicationId = \"com.example.autophoto.polished.impact.v044\"" in Path("app/build.gradle.kts").read_text()
+          assert "applicationId = \"com.example.autophoto.polished.selective.v045\"" in Path("app/build.gradle.kts").read_text()
           polished=Path("app/src/main/java/com/example/autophoto/PolishedAIProcessor.kt").read_text()
           assert all(t in polished for t in [
               'AlternativeAIProcessor.adaptiveLut(',
@@ -88,9 +88,12 @@ jobs:
               "refreshPolishedButtons()",
               "runPolishedAI()"
           ])
-          assert "safeChromaScale(" in polished and "val tonalSeparation = if (impact > 0f)" in polished
-          assert 'Style.POLISHED -> 0f' in polished
-          assert 'Style.POLISHED_PLUS -> 0.62f' in polished and 'Style.WOW -> 1f' in polished
+          assert "safeChromaScale(" in polished and "val wowFinish = if (style == Style.WOW)" in polished
+          assert "val plusFinish = if (style == Style.POLISHED_PLUS)" in polished
+          assert 'POLISHED("Polished", 0.75f, 0.10f, 5.0f, 0.12f, 0.24f)' in polished
+          assert 'WOW("Wow", 0.75f, 0.10f, 5.0f, 0.12f, 0.24f)' in polished
+          assert "if (style == Style.POLISHED)" in polished
+          assert "depthOpportunity" in polished and "protectedPetals" in polished
           assert "for (button in arrayOf(openButton, saveButton))" in ui
           assert "root.addView(polishedButton," in ui
           assert "root.addView(polishedRow," in ui
@@ -104,7 +107,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AutoPhoto-Polished-Impact-v0.4.4-APK
+          name: AutoPhoto-Selective-Wow-v0.4.5-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
@@ -112,19 +115,19 @@ jobs:
         if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: autophoto-polished-impact-v0.4.4
-          name: AutoPhoto Polished Impact v0.4.4 — Distinct Looks
+          tag_name: autophoto-polished-selective-v0.4.5
+          name: AutoPhoto Selective Wow v0.4.5 — Option B
           make_latest: false
           generate_release_notes: false
           body: |
-            AutoPhoto Polished Impact v0.4.4 keeps the simplified screen,
-            pretrained learned LUT and original Polished baseline.
-            Polished+ and Wow now have more distinct tonal depth, regional
-            microcontrast and selectively richer colour, while protecting
-            skin, flower highlights, foliage and dark backgrounds.
-            The new gamut-fitting step prevents independent RGB clipping.
-            Original apps remain intact thanks to a separate app ID.
-            Fully offline. Quality still needs real photo comparisons.
+            Option B: redesign Wow to use texture-guided focal separation,
+            gentle smooth-background depth, restrained local relief and
+            strong skin/red-petal/magenta/highlight protection. Polished
+            is unchanged from the photographic baseline; Polished+ is
+            deliberately milder than v0.4.4. Trained offline LUT intact.
+            The simple original interface and previous engines remain.
+            New separate app ID does not overwrite any existing version.
+            The app is built; actual quality still requires phone tests.
           files: app/build/outputs/apk/debug/*.apk
           fail_on_unmatched_files: true
           overwrite_files: true

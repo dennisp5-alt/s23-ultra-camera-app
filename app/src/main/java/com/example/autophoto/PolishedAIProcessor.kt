@@ -10,7 +10,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /**
- * AutoPhoto Polished Impact Lab v0.4.4 (Polished baseline unchanged)
+ * AutoPhoto Selective Wow Lab v0.4.5 (Polished baseline unchanged)
  *
  * Original / neural-LUT fusion -> scene-dependent filmic tone curve ->
  * vibrance and colour separation -> softly masked, edge-limited texture pop.
@@ -32,8 +32,11 @@ object PolishedAIProcessor {
         val detailGain: Float
     ) {
         POLISHED("Polished", 0.75f, 0.10f, 5.0f, 0.12f, 0.24f),
-        POLISHED_PLUS("Polished+", 0.90f, 0.16f, 8.5f, 0.21f, 0.36f),
-        WOW("Wow", 1.00f, 0.23f, 13.0f, 0.30f, 0.52f)
+        // Polished+ is now a small, controlled step over the reference.
+        POLISHED_PLUS("Polished+", 0.80f, 0.12f, 6.0f, 0.14f, 0.27f),
+        // Wow starts from Polished, not the former exaggerated v0.4.4
+        // global profile, and uses its own *regional* finishing below.
+        WOW("Wow", 0.75f, 0.10f, 5.0f, 0.12f, 0.24f)
     }
 
     data class Result(
@@ -177,13 +180,20 @@ object PolishedAIProcessor {
         }
         progress(50)
 
-        // All Polished calculations remain equivalent to the 0.4.3 baseline.
-        // New looks use a second, distinct finishing architecture.
-        val impact = when (style) {
-            Style.POLISHED -> 0f
-            Style.POLISHED_PLUS -> 0.62f
-            Style.WOW -> 1f
+        // The original Polished branch is intentionally pixel-equivalent to
+        // v0.4.3/v0.4.4. A selective background-depth effect needs some
+        // structured areas to contrast with smooth regions; otherwise no
+        // synthetic "subject pop" is imposed on an all-flat/all-busy scene.
+        var structuredPixels = 0
+        if (style == Style.WOW) {
+            for (value in texture) if (value > 0.42f) structuredPixels++
         }
+        val structureFraction = structuredPixels.toFloat() /
+            texture.size.coerceAtLeast(1)
+        val depthOpportunity = if (style == Style.WOW)
+            ease((structureFraction - 0.025f) / 0.12f) *
+                (1f - 0.72f * ease((structureFraction - 0.58f) / 0.30f))
+        else 0f
         val output = Bitmap.createBitmap(
             source.width, source.height, Bitmap.Config.ARGB_8888)
         val batch = min(16, source.height)
@@ -278,65 +288,94 @@ object PolishedAIProcessor {
                         (1f - 0.65f * ease((y - 202f) / 52f))
                     val colourScale = (1f + vividness).coerceIn(1f, 1.4f)
 
-                    // Richer midtone light/dark separation, not a uniform
-                    // brightness increase. Black floor and specular/channel
-                    // highlights are anchored to protect night and petals.
+                    // v0.4.5: do NOT apply a global extra S-curve to Wow.
+                    // The older Wow was overly broad, and did not beat the
+                    // original Polished look on the bottlebrush photograph.
+                    // Analyze local texture and protective colour guards to
+                    // separate structurally defined areas from smooth ones.
                     val peakOriginal = max(sr, max(sg, sb))
-                    val channelHighlightGuard = 1f -
-                        0.88f * ease((peakOriginal - 202f) / 49f)
-                    val normalizedY = (y - 128f) / 128f
-                    val sCurve = normalizedY *
-                        (1f - normalizedY * normalizedY)
-                    val tonalSeparation = if (impact > 0f)
-                        (sCurve * 42f * impact * shadowGuard *
-                            channelHighlightGuard *
-                            (if (darkScene) 0.53f else 1f))
-                            .coerceIn(-14f, 14f)
-                    else 0f
-
-                    // Stronger *existing* texture separation in defined
-                    // regions, not generative detail or semantic segmentation.
-                    // Skin, flowers, shadows and bokeh remain guarded.
-                    val structuredArea = ease((t - 0.16f) / 0.48f)
-                    val dimension = if (impact > 0f)
-                        (detail * (0.36f + 0.80f * impact) *
-                            detailSafety * structuredArea *
-                            channelHighlightGuard).coerceIn(-11f, 11f)
-                    else 0f
-
-                    // Saturation selectively enriches muted colours while
-                    // suppressing neon foliage and red/magenta petal damage.
-                    val vividGreen = ease((sg - max(sr, sb) - 14f) / 55f) *
-                        ease((saturation - 0.20f) / 0.45f)
+                    val highlightHeadroom = 1f -
+                        0.94f * ease((peakOriginal - 191f) / 61f)
                     val pinkPetal = ease((sr - sg - 12f) / 55f) *
                         ease((sb - sg - 9f) / 55f) *
                         ease((saturation - 0.20f) / 0.48f)
-                    val vibrantGuard = (1f - 0.70f * skinLike) *
-                        (1f - 0.68f * max(redFlower, pinkPetal)) *
-                        (1f - 0.58f * vividGreen) *
-                        channelHighlightGuard
-                    val extraColour = if (impact > 0f)
-                        impact * (0.12f + 0.13f * (1f - saturation)) *
-                            vibrantGuard
+                    val protectedPetals = max(redFlower, pinkPetal)
+                    val saturatedGreen = ease((sg - max(sr, sb) - 14f) / 55f) *
+                        ease((saturation - 0.20f) / 0.45f)
+                    val sensitiveRegion = (1f - 0.80f * skinLike) *
+                        (1f - 0.90f * protectedPetals) *
+                        (1f - 0.62f * saturatedGreen) *
+                        highlightHeadroom
+                    val midtoneWindow = ease((y - 44f) / 67f) *
+                        (1f - ease((y - 177f) / 67f))
+                    val structure = ease((t - 0.19f) / 0.43f)
+                    val smoothBackground = 1f -
+                        ease((t - 0.08f) / 0.42f)
+                    val darkMood = if (darkScene) 0.43f else 1f
+
+                    // Polished+ is deliberately a modest adjustment:
+                    // limited mids separation and very small local detail
+                    // support, with no strong global brightness expansion.
+                    val normalizedY = (y - 128f) / 128f
+                    val subtleCurve = normalizedY *
+                        (1f - normalizedY * normalizedY)
+                    val plusFinish = if (style == Style.POLISHED_PLUS)
+                        (subtleCurve * 3.2f + detail * 0.08f * t) *
+                            sensitiveRegion * darkMood
                     else 0f
 
-                    // The old Polished branch remains untouched numerically.
-                    // Count candidate out-of-gamut pixels before preserving
-                    // hue/luminance with chroma-only gamut mapping.
-                    val newY = if (impact > 0f)
-                        (y + tone + texturePop + tonalSeparation + dimension)
-                            .coerceIn(0f, 255f)
-                    else y + tone + texturePop
-                    val requestedChroma = colourScale + extraColour
+                    // Wow is a separate aesthetic, NOT a higher-strength
+                    // version of Polished+. Smooth backgrounds are gently
+                    // deepened while already-defined midtone structure gets
+                    // restrained lift and microcontrast. This is *texture-
+                    // driven*, not actual semantic person/flower detection.
+                    // Strong red, pink, skin and single-channel whites remain
+                    // mostly unchanged; bokeh is never sharpened.
+                    val wowFinish = if (style == Style.WOW) {
+                        val focus = structure * midtoneWindow *
+                            sensitiveRegion * darkMood
+                        val focalLift = 5.2f * focus
+                        val backdropDepth = -4.6f * smoothBackground *
+                            midtoneWindow * depthOpportunity *
+                            (1f - 0.76f * skinLike) *
+                            (1f - 0.88f * protectedPetals) *
+                            (1f - 0.47f * saturatedGreen) *
+                            highlightHeadroom * darkMood
+                        val fineRelief = (detail * 0.30f * structure *
+                            detailSafety * sensitiveRegion * darkMood)
+                            .coerceIn(-3.8f, 3.8f)
+                        (focalLift + backdropDepth + fineRelief)
+                            .coerceIn(-7.0f, 7.0f)
+                    } else 0f
+
+                    // All three start from their original and neural inputs.
+                    // Polished has zero additional finishing and retains the
+                    // exact original v0.4.3 expression, hue and risk counter.
+                    val newY = if (style == Style.POLISHED)
+                        y + tone + texturePop
+                    else (y + tone + texturePop + plusFinish + wowFinish)
+                        .coerceIn(0f, 255f)
+                    val selectiveChroma = when (style) {
+                        Style.POLISHED -> 0f
+                        Style.POLISHED_PLUS -> 0.022f * midtoneWindow *
+                            sensitiveRegion
+                        Style.WOW -> 0.045f * structure * midtoneWindow *
+                            sensitiveRegion * darkMood
+                    }
+                    val requestedChroma = colourScale + selectiveChroma
+
+                    // Count gamut pressure BEFORE mapping; gamut fitting
+                    // scales RGB chroma uniformly, avoiding independently
+                    // clipped channels or pink/red hue distortion.
                     val proposedR = newY + (r - y) * requestedChroma
                     val proposedG = newY + (g - y) * requestedChroma
                     val proposedB = newY + (b - y) * requestedChroma
                     if (proposedR < 0f || proposedG < 0f || proposedB < 0f ||
                         proposedR > 255f || proposedG > 255f ||
                         proposedB > 255f) clipped++
-                    val appliedChroma = if (impact > 0f)
-                        safeChromaScale(newY, r, g, b, y, requestedChroma)
-                    else requestedChroma
+                    val appliedChroma = if (style == Style.POLISHED)
+                        requestedChroma
+                    else safeChromaScale(newY, r, g, b, y, requestedChroma)
                     val cr = newY + (r - y) * appliedChroma
                     val cg = newY + (g - y) * appliedChroma
                     val cb = newY + (b - y) * appliedChroma
