@@ -6,11 +6,11 @@ android {
     namespace = "com.example.autophoto"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.example.autophoto.alternatives.v037"
+        applicationId = "com.example.autophoto.alternatives.v038"
         minSdk = 29
         targetSdk = 35
         versionCode = 1
-        versionName = "0.3.7-ai-person-semantic"
+        versionName = "0.3.8-mlkit-semantic"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -23,5 +23,6 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.9.3")
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
+    implementation("com.google.mlkit:segmentation-selfie:16.0.0-beta6")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }

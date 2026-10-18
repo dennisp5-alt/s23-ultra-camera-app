@@ -22,28 +22,9 @@ mobile=grab("https://raw.githubusercontent.com/AVC2-UESTC/MobileIE/main/pretrain
 assert mobile[4:8]==b"TFL3" and 10000<len(mobile)<200000, "Unexpected MobileIE trained model"
 (ROOT/"mobileie_lolv1.tflite").write_bytes(mobile)
 
-# Genuine Google MediaPipe person/background segmentation. Downloaded only on
-# the GitHub builder. Trained model is bundled for offline Android inference.
-person=grab("https://storage.googleapis.com/mediapipe-assets/selfie_segmentation.tflite")
-assert person[4:8]==b"TFL3" and 100000<len(person)<15000000, (
-    "Unexpected official MediaPipe segmentation model")
-try:
-    import tflite
-    m=tflite.Model.GetRootAsModel(person,0)
-    sg=m.Subgraphs(0)
-    i=sg.Tensors(sg.Inputs(0))
-    o=sg.Tensors(sg.Outputs(0))
-    input_shape=i.ShapeAsNumpy().tolist()
-    output_shape=o.ShapeAsNumpy().tolist()
-    print("Person segmentation input",input_shape,"output",output_shape,
-          "types",i.Type(),o.Type(),flush=True)
-    assert input_shape==[1,256,256,3], "Unexpected person model input"
-    assert output_shape==[1,256,256,1], "Unexpected person model output"
-    assert i.Type()==0 and o.Type()==0, "Expected FP32 model input/output"
-except Exception as e:
-    raise RuntimeError("Person segmentation metadata verification failed") from e
-(ROOT/"mediapipe_person_segmentation.tflite").write_bytes(person)
-
+# v0.3.8 uses Google's bundled offline ML Kit segmentation SDK.
+# No direct custom-operation MediaPipe model is downloaded. The old raw model
+# had the Convolution2DTransposeBias custom operator unsupported by vanilla TFLite.
 
 base="https://raw.githubusercontent.com/HuiZeng/Image-Adaptive-3DLUT/master/pretrained_models/sRGB"
 lutState=torch.load(io.BytesIO(grab(base+"/LUTs.pth")), map_location="cpu", weights_only=False)
