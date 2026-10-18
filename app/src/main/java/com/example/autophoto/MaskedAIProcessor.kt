@@ -119,9 +119,9 @@ object MaskedAIProcessor {
         progress(1)
         val person = PersonSegmentation.infer(context, src)
         progress(12)
-        val result = enhance(context, src, { pct ->
+        val result = enhance(context, src, person) { pct ->
             progress(12 + (pct * 88 / 100).coerceIn(0, 88))
-        }, person)
+        }
         return result.copy(
             personMaskActive = person.detected,
             personMaskCoverage = person.coverage,
@@ -131,8 +131,9 @@ object MaskedAIProcessor {
         )
     }
 
-    fun enhance(context: Context, src: Bitmap, progress: (Int) -> Unit,
-                semantic: PersonSegmentation.Result? = null): Report {
+    fun enhance(context: Context, src: Bitmap,
+                semantic: PersonSegmentation.Result? = null,
+                progress: (Int) -> Unit): Report {
         val start = SystemClock.elapsedRealtime()
         progress(1)
 
