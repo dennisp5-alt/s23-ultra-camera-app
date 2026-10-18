@@ -1,22 +1,30 @@
-# AutoPhoto AI Lab v0.3.4 — Natural photo and highlight refinement
+# AutoPhoto AI Lab v0.3.5 — Offline masked multi-pass neural enhancement
 
-**Separate experimental application** for Samsung Galaxy S23 Ultra. Android application ID `com.example.autophoto.alternatives.v034` installs alongside AutoPhoto AI Lab v0.3.3, AutoPhoto Full AI/MIRNet and the existing camera app. No modifications to `MainActivity.autoCorrect()` or `ImageProcessor.correct()`—the working Auto correction remains unchanged.
+A separate installable Android experiment for the Samsung Galaxy S23 Ultra. App ID `com.example.autophoto.alternatives.v035`. The original Auto mode, existing v0.3.3 and v0.3.4 AI Lab apps, MIRNet Full AI and main camera app are preserved.
 
-## Modes
+## Processing modes
 
-- **Auto:** Completely unchanged from v0.3.3.
-- **MobileIE AI:** Retains official pretrained ICCV 2025 `lolv1.tflite` and the same 768px neural guidance; now detects dark-background / bright-subject scenes, limits darkness and colour shifts, and protects pink highlights. True dark photos retain stronger learned enhancement.
-- **Learned 3D LUT:** Retains the official pretrained Image-Adaptive-3DLUT sRGB ONNX classifier and three 33^3 learned LUT bases. Uses the original full-resolution trilinear interpolation but protects black levels, highlights, pink colours and near-clipping channels; a **genuine image-specific AI-predicted LUT** is still applied.
-- Both modes report neural inference and total processing time.
+- **Auto**: The known-good existing histogram/colour routine, completely unchanged.
+- **MobileIE**: Original trained `lolv1.tflite`, v0.3.4 natural-colour safeguards, unchanged.
+- **Learned 3D LUT**: Original pretrained classifier exported as ONNX and three learned 33×33×33 LUT bases; v0.3.4 safeguards, unchanged.
+- **Masked Multi-pass AI** (NEW): runs each genuine pretrained neural engine **once**, then builds multiple differentiable masks from the same original image:
+  1. Neural enhancement predictions — infer MobileIE and the per-photo learned adaptive LUT once each
+  2. Build soft luminance, shadow, highlight, magenta/pink colour-family, green foliage-colour-family, and local-contrast boundary masks on the original photo downsampled to ≤640px long edge
+  3. Apply joint-luminance/edge-aware 3×3 filtering to the AI blend weight masks; bilinearly interpolate them at full output resolution
+  4. Blend the two AI predictions differently in each local region, with final shadow, highlight, colour-shift and clipping protection at original decoded resolution
 
-## QA, measurements and limitations
+This is **tone/colour based regional masking**, *not* semantic/AI object segmentation. For example, a pink colour-range mask may also cover similarly coloured surfaces; it does not identify a rose as an object.
 
-The supplied 1536×1152 pink rose JPEGs informed the corrections. At v0.3.3, MobileIE delivered a darker warmer photograph and the learned 3D LUT version lifted black backgrounds too much. The v0.3.4 blending changes address these effects conservatively without changing the actual model inference workload or input resolution. They **have not been validated on the phone** yet; outcome must be compared using identical source photos.
+## Quality and speed
 
-Machine learning models are trained for low-light/retouching datasets rather than custom Samsung rendering; image quality cannot be guaranteed. Their neural model weights are downloaded at **CI build time only** and packed into the offline APK, and the installed app makes no network calls.
+- Proven fast independent inference engines from v0.3.4 are retained, but masked mode invokes both once, so expect more runtime than either single engine and less than MIRNet if the phone behaves as before.
+- The new masks avoid abrupt tile/region boundaries and do not re-run inference for every region; there are additional pixel-composition and filter passes.
+- The mask engine does not invent lost detail, reconstruct saturated pixels, perform generative edits, or guarantee higher quality.
+- Reports total processing time plus both model inference times after processing. Compare original, Auto, the two AI modes, and Masked AI on the **same source JPEG**, especially the pink rose, daytime scenes, darker photos, skin tones, foliage and bright skies.
 
-Official model repositories:
-- https://github.com/AVC2-UESTC/MobileIE
-- https://github.com/HuiZeng/Image-Adaptive-3DLUT
+## Sources
 
-Both projects supply Apache-2.0 licensed source/model assets.
+- [MobileIE, ICCV 2025](https://github.com/AVC2-UESTC/MobileIE)
+- [Image-Adaptive 3DLUT](https://github.com/HuiZeng/Image-Adaptive-3DLUT)
+
+Both models are downloaded only by GitHub Actions at build time and included offline within the APK. The app does not require internet access.

@@ -50,6 +50,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var autoButton: Button
     private lateinit var aiButton: Button
     private lateinit var lutButton: Button
+    private lateinit var maskedButton: Button
     private lateinit var saveButton: Button
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -175,6 +176,23 @@ class MainActivity : ComponentActivity() {
             LinearLayout.LayoutParams.WRAP_CONTENT
         ))
 
+        // Third independent mode: combines real outputs of both trained
+        // networks through multiple edge-aware regional masking passes.
+        maskedButton = Button(this).apply {
+            text = "Masked Multi-pass AI"
+            isAllCaps = false
+            textSize = 13f
+            minHeight = (48 * resources.displayMetrics.density).roundToInt()
+            setOnClickListener { runMaskedAI() }
+        }
+        root.addView(maskedButton, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            marginStart = pad / 4
+            marginEnd = pad / 4
+        })
+
         info = TextView(this).apply {
             text = "Choose a photo to start"
             gravity = Gravity.CENTER
@@ -218,6 +236,7 @@ class MainActivity : ComponentActivity() {
         autoButton.isEnabled = !busy && original != null
         aiButton.isEnabled = !busy && original != null
         lutButton.isEnabled = !busy && original != null
+        maskedButton.isEnabled = !busy && original != null
         saveButton.isEnabled = !busy && corrected != null
     }
 
@@ -285,6 +304,37 @@ class MainActivity : ComponentActivity() {
                     "%.1f".format(neural) + "s neural • tap to compare"
             } catch (e: Exception) {
                 errorMessage(mode + " failed", e)
+            } finally {
+                setBusy(false)
+            }
+        }
+    }
+
+    private fun runMaskedAI() {
+        val source = original ?: return
+        scope.launch {
+            setBusy(true)
+            info.text = "Masked AI • preparing regional correction…"
+            try {
+                val output = withContext(Dispatchers.Default) {
+                    MaskedAIProcessor.enhance(this@MainActivity, source) { percent ->
+                        runOnUiThread {
+                            info.text = "Masked AI • processing " + percent + "%"
+                        }
+                    }
+                }
+                corrected = output.bitmap
+                showOriginal = false
+                image.setImageBitmap(output.bitmap)
+                val total = output.totalMillis / 1000.0
+                val mobileMs = output.mobileInferenceMs / 1000.0
+                val lutMs = output.lutInferenceMs / 1000.0
+                info.text = "Masked AI • " + "%.1f".format(total) + "s total" +
+                    " (MobileIE " + "%.1f".format(mobileMs) +
+                    "s / LUT " + "%.1f".format(lutMs) + "s)" +
+                    " • tap photo to compare"
+            } catch (e: Exception) {
+                errorMessage("Masked AI failed", e)
             } finally {
                 setBusy(false)
             }
