@@ -137,15 +137,52 @@ object MaskedAIProcessor {
             preview.getPixels(pixels, 0, w, 0, 0, w, h)
             if (preview !== src) preview.recycle()
 
+            // Score the neural predictions on the same mask-grid as the
+            // original. These are real trained-model outputs, not handpicked
+            // colour targets. Small previews make regional analysis cheap.
+            val mobilePreview = Bitmap.createScaledBitmap(mobile.bitmap, w, h, true)
+            val lutPreview = Bitmap.createScaledBitmap(lut.bitmap, w, h, true)
+            val mobilePixels = IntArray(w * h)
+            val lutPixels = IntArray(w * h)
+            mobilePreview.getPixels(mobilePixels, 0, w, 0, 0, w, h)
+            lutPreview.getPixels(lutPixels, 0, w, 0, 0, w, h)
+            if (mobilePreview !== mobile.bitmap) mobilePreview.recycle()
+            if (lutPreview !== lut.bitmap) lutPreview.recycle()
+
             val luma = FloatArray(pixels.size) { i -> luminance(pixels[i]) }
             val p50 = percentile(luma, 0.5f)
             val p90 = percentile(luma, 0.9f)
             val lowLight = p90 < 95 && p50 < 50
 
-            // Region masks are *soft probabilities* estimated from actual pixel
-            // values. No false claim of semantic object segmentation is made.
+            // Pass 2: physically interpretable region masks and local trust
+            // estimates from both actual AI outputs. We deliberately do not
+            // pretend to recognise people, roses, sky or any semantic objects.
             val mobileMask = FloatArray(pixels.size)
             val lutMask = FloatArray(pixels.size)
+            val detailMask = FloatArray(pixels.size)
+            val darkBackgroundWithSubject = p50 < 54 && p90 > 108
+
+            fun modelTrust(base: Int, predicted: Int, originalY: Float,
+                           sensitiveColour: Float): Float {
+                val dr = (((predicted shr 16) and 255) -
+                    ((base shr 16) and 255)).toFloat()
+                val dg = (((predicted shr 8) and 255) -
+                    ((base shr 8) and 255)).toFloat()
+                val db = ((predicted and 255) - (base and 255)).toFloat()
+                val dy = 0.2126f * dr + 0.7152f * dg + 0.0722f * db
+                val hueError = (abs(dr - dy) + abs(dg - dy) +
+                    abs(db - dy)) / 3f
+                // Soft confidence decay for unexpectedly extreme neural
+                // exposure / colour changes, not a hard seam-producing cutoff.
+                val exposureOutlier = abs(dy) / if (lowLight) 25f else 16f
+                val colourOutlier = hueError / if (sensitiveColour > 0.4f) 8f else 14f
+                val risk = exposureOutlier * exposureOutlier +
+                    colourOutlier * colourOutlier
+                val shadowRisk = if (dy < 0f && originalY < 78f)
+                    0.26f else 0f
+                return (1f / (1f + risk + shadowRisk)).coerceIn(0.10f, 1f)
+            }
+
             for (y in 0 until h) {
                 for (x in 0 until w) {
                     val i = y * w + x
@@ -155,39 +192,72 @@ object MaskedAIProcessor {
                     val b = (p and 255).toFloat()
                     val lum = luma[i]
 
-                    val black = 1f - ease((lum - 17f) / 65f)
-                    val highlight = ease((lum - 150f) / 90f)
+                    val black = 1f - ease((lum - 18f) / 56f)
+                    val highlight = ease((lum - 139f) / 101f)
                     val pinkFamily = min(ease((r - g - 9f) / 55f),
                         ease((b - g - 3f) / 50f)) * ease((r - 65f) / 80f)
                     val greenFamily = ease((g - max(r, b) - 7f) / 48f) *
                         ease((g - 43f) / 88f)
-                    val localGradient = max(
-                        abs(lum - luma[y * w + min(x + 1, w - 1)]),
-                        abs(lum - luma[min(y + 1, h - 1) * w + x])
-                    )
-                    val edge = ease(localGradient / 55f)
+                    // Colour ranges are *not* skin/flower recognition: regions
+                    // can share a hue. Sensitive warm/pink areas get less
+                    // chroma alteration irrespective of their actual subject.
+                    val warmSensitive = ease((r - g - 6f) / 44f) *
+                        ease((g - b + 10f) / 55f) *
+                        ease((r - 65f) / 85f)
+                    val colourSensitive = max(pinkFamily, warmSensitive)
+                    val rightY = luma[y * w + min(x + 1, w - 1)]
+                    val downY = luma[min(y + 1, h - 1) * w + x]
+                    val edge = ease(max(abs(lum - rightY), abs(lum - downY)) / 42f)
+                    detailMask[i] = edge
 
-                    val lutWeight = (0.77f - 0.39f * black -
-                        0.38f * highlight - 0.31f * pinkFamily -
-                        0.11f * greenFamily - 0.07f * edge)
-                        .coerceIn(0.04f, 0.74f)
-                    val middle = ease((lum - 16f) / 55f)
-                    val mobileWeight = ((if (lowLight) 0.53f else 0.27f) *
-                        (0.35f + 0.65f * middle) *
-                        (1f - 0.75f * highlight) *
-                        (if (lowLight) 1f else 1f - 0.68f * black) *
-                        (1f - 0.42f * pinkFamily))
-                        .coerceIn(0f, 0.56f)
+                    val mobileY = luminance(mobilePixels[i])
+                    val lutY = luminance(lutPixels[i])
+                    val disagreement = abs(mobileY - lutY)
+                    val agreement = 1f / (1f + (disagreement / 16f) *
+                        (disagreement / 16f))
+                    val mobileTrust = modelTrust(p, mobilePixels[i],
+                        lum, colourSensitive)
+                    val lutTrust = modelTrust(p, lutPixels[i],
+                        lum, colourSensitive)
 
-                    mobileMask[i] = mobileWeight
-                    lutMask[i] = lutWeight
+                    val middle = ease((lum - 19f) / 57f)
+                    val mobilePreference = (if (lowLight) 0.67f else 0.32f) *
+                        (0.19f + 0.81f * middle) *
+                        (1f - 0.83f * highlight) *
+                        (1f - 0.56f * pinkFamily) *
+                        (if (lowLight) 1f else 1f - 0.80f * black)
+                    val lutPreference = (0.87f -
+                        0.48f * black -
+                        0.50f * highlight -
+                        0.39f * pinkFamily -
+                        0.16f * greenFamily -
+                        0.12f * edge)
+                        .coerceIn(0.03f, 0.84f)
+
+                    // More confidence where both neural predictions agree;
+                    // otherwise favour whichever has fewer tone/chroma risks.
+                    val confidence = 0.68f + 0.32f * agreement
+                    val focus = 1f - 0.16f * edge
+                    val sceneFactor = if (darkBackgroundWithSubject &&
+                        black > 0.65f) 0.35f else 1f
+                    mobileMask[i] = (mobilePreference * mobileTrust *
+                        confidence * focus * sceneFactor)
+                        .coerceIn(0f, 0.68f)
+                    lutMask[i] = (lutPreference * lutTrust *
+                        confidence * focus * sceneFactor)
+                        .coerceIn(0f, 0.83f)
                 }
             }
             progress(78)
 
             // Refinement pass: edge-aware feathered masks, no hard segmentation.
-            val softMobile = smoothEdgeAware(mobileMask, luma, w, h)
-            val softLut = smoothEdgeAware(lutMask, luma, w, h)
+            // Two small passes suppress quantisation/segmentation boundaries
+            // while respecting strong tone boundaries; no box-shaped tiles.
+            val softMobile = smoothEdgeAware(
+                smoothEdgeAware(mobileMask, luma, w, h), luma, w, h)
+            val softLut = smoothEdgeAware(
+                smoothEdgeAware(lutMask, luma, w, h), luma, w, h)
+            val softDetail = smoothEdgeAware(detailMask, luma, w, h)
             progress(82)
 
             // Final native-resolution compositing and safeguards, row-by-row
@@ -213,8 +283,8 @@ object MaskedAIProcessor {
                         var mw = sample(softMobile, w, h, px, my)
                         var lw = sample(softLut, w, h, px, my)
                         val total = mw + lw
-                        if (total > 0.91f) {
-                            val factor = 0.91f / total
+                        if (total > 0.94f) {
+                            val factor = 0.94f / total
                             mw *= factor
                             lw *= factor
                         }
@@ -244,7 +314,7 @@ object MaskedAIProcessor {
                         }
                         val headroom = (252f - highest).coerceAtLeast(0f)
                         val rise = min(limit, headroom)
-                        val fall = if (lum < 50f) -1.6f else -5f
+                        val fall = if (lum < 50f) -1.3f else -5f
                         val protectedTone = tone.coerceIn(fall, rise)
 
                         val pink = r > g * 1.20f && b > g * 1.04f && r > 85f
@@ -263,10 +333,77 @@ object MaskedAIProcessor {
                     }
                 }
                 edited.setPixels(originalRow, 0, src.width, 0, top, src.width, rows)
-                progress(82 + (18.0 * (top + rows) / src.height).roundToInt())
+                progress(82 + (13.0 * (top + rows) / src.height).roundToInt())
             }
+            // Pass 4: quality-control pass at native output resolution.
+            // Recheck the *proposed* edited image against the untouched
+            // original rather than blindly adding more passes/strength.
+            // An edge/highlight can need *less* editing, not more.
+            progress(95)
+            val checked = Bitmap.createBitmap(src.width, src.height,
+                Bitmap.Config.ARGB_8888)
+            val candidateRow = IntArray(src.width * batch)
+            for (top in 0 until src.height step batch) {
+                val rows = min(batch, src.height - top)
+                src.getPixels(originalRow, 0, src.width, 0, top, src.width, rows)
+                edited.getPixels(candidateRow, 0, src.width, 0, top, src.width, rows)
+                for (ry in 0 until rows) {
+                    val maskY = (top + ry + 0.5f) * h / src.height - 0.5f
+                    for (x in 0 until src.width) {
+                        val i = ry * src.width + x
+                        val op = originalRow[i]
+                        val alpha = op ushr 24
+                        if (alpha == 0) continue
+                        val np = candidateRow[i]
+                        val r = ((op shr 16) and 255).toFloat()
+                        val g = ((op shr 8) and 255).toFloat()
+                        val b = (op and 255).toFloat()
+                        val nr = ((np shr 16) and 255).toFloat()
+                        val ng = ((np shr 8) and 255).toFloat()
+                        val nb = (np and 255).toFloat()
+                        val originalY = luminance(op)
+                        val currentY = luminance(np)
+                        val mx = (x + 0.5f) * w / src.width - 0.5f
+                        val edge = sample(softDetail, w, h, mx, maskY)
+                        val highlight = ease((originalY - 168f) / 72f)
+                        val deepBlack = 1f - ease((originalY - 12f) / 40f)
+
+                        // A brighter *new* image is not automatically better.
+                        // Screen edges, backlit flower petals and deep black
+                        // areas should keep their original texture/tonality.
+                        val safetyBlend = (0.14f * edge +
+                            0.37f * highlight + 0.31f * deepBlack)
+                            .coerceIn(0f, 0.67f)
+                        val proposedY = currentY - originalY
+                        val maxRise = min(
+                            if (lowLight) 21f else 15f,
+                            (251f - max(r, max(g, b))).coerceAtLeast(0f))
+                        val toneClamp = proposedY.coerceIn(
+                            if (originalY < 48f) -1.4f else -8f,
+                            if (originalY < 20f) 1.2f else maxRise)
+                        val redDelta = nr - r
+                        val greenDelta = ng - g
+                        val blueDelta = nb - b
+                        val excess = proposedY - toneClamp
+                        // Revert selectively to original when new correction
+                        // violates per-region exposure, colour or edge safety.
+                        fun finalChannel(base: Float, delta: Float): Int =
+                            (base + (delta - excess) * (1f - safetyBlend))
+                                .roundToInt().coerceIn(0, 255)
+                        val fr = finalChannel(r, redDelta)
+                        val fg = finalChannel(g, greenDelta)
+                        val fb = finalChannel(b, blueDelta)
+                        candidateRow[i] = (alpha shl 24) or
+                            (fr shl 16) or (fg shl 8) or fb
+                    }
+                }
+                checked.setPixels(candidateRow, 0, src.width, 0, top,
+                    src.width, rows)
+                progress(95 + (5.0 * (top + rows) / src.height).roundToInt())
+            }
+            edited.recycle()
             progress(100)
-            return Report(edited, mobile.inferenceMillis, lut.inferenceMillis,
+            return Report(checked, mobile.inferenceMillis, lut.inferenceMillis,
                 SystemClock.elapsedRealtime() - start, lowLight)
         } finally {
             mobile.bitmap.recycle()

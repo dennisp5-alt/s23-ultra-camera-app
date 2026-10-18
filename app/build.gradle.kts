@@ -6,11 +6,11 @@ android {
     namespace = "com.example.autophoto"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.example.autophoto.alternatives.v035"
+        applicationId = "com.example.autophoto.alternatives.v036"
         minSdk = 29
         targetSdk = 35
         versionCode = 1
-        versionName = "0.3.5-ai-masked"
+        versionName = "0.3.6-ai-adaptive-masking"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

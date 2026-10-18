@@ -1,30 +1,24 @@
-# AutoPhoto AI Lab v0.3.5 — Offline masked multi-pass neural enhancement
+# AutoPhoto AI Lab v0.3.6 — Adaptive Masked Refinement
 
-A separate installable Android experiment for the Samsung Galaxy S23 Ultra. App ID `com.example.autophoto.alternatives.v035`. The original Auto mode, existing v0.3.3 and v0.3.4 AI Lab apps, MIRNet Full AI and main camera app are preserved.
+This is a new **separately installable offline Android experiment** for Samsung Galaxy S23 Ultra.
 
-## Processing modes
+**Distinct package:** `com.example.autophoto.alternatives.v036`; all v0.3.5 and previous APKs remain installable. Auto, independent MobileIE and independent Learned 3D LUT are preserved unchanged from the working v0.3.5 source.
 
-- **Auto**: The known-good existing histogram/colour routine, completely unchanged.
-- **MobileIE**: Original trained `lolv1.tflite`, v0.3.4 natural-colour safeguards, unchanged.
-- **Learned 3D LUT**: Original pretrained classifier exported as ONNX and three learned 33×33×33 LUT bases; v0.3.4 safeguards, unchanged.
-- **Masked Multi-pass AI** (NEW): runs each genuine pretrained neural engine **once**, then builds multiple differentiable masks from the same original image:
-  1. Neural enhancement predictions — infer MobileIE and the per-photo learned adaptive LUT once each
-  2. Build soft luminance, shadow, highlight, magenta/pink colour-family, green foliage-colour-family, and local-contrast boundary masks on the original photo downsampled to ≤640px long edge
-  3. Apply joint-luminance/edge-aware 3×3 filtering to the AI blend weight masks; bilinearly interpolate them at full output resolution
-  4. Blend the two AI predictions differently in each local region, with final shadow, highlight, colour-shift and clipping protection at original decoded resolution
+## New Adaptive Masked AI mode
 
-This is **tone/colour based regional masking**, *not* semantic/AI object segmentation. For example, a pink colour-range mask may also cover similarly coloured surfaces; it does not identify a rose as an object.
+1. **Neural predictions:** Perform actual pretrained MobileIE low-light TensorFlow Lite inference once, and actual pretrained image-adaptive 3D-LUT ONNX classification and learned LUT interpolation once. Model weights and their input resolutions remain unchanged.
+2. **Regional analysis:** Compare original and both real neural output images on a 640px analysis grid; build overlapping *soft tonal and colour* masks for deep shadows, bright highlights, pink/sensitive warm tones, green foliage-like colours and local contrast boundaries. These are NOT object labels or semantic person/flower segmentation.
+3. **Confidence-weighted selection:** The less plausible an engine's colour/brightness shift, the less it influences that area. Model agreement, dark-background/bright-subject identification, local gradients, and scene exposure adjust the mobile/LUT mixture per region. The source image remains the conservative reference.
+4. **Two-pass edge-aware feathering:** smooth model weights along tonal regions to prevent sharp-edged masks while reducing excessive bleeding across contrast boundaries.
+5. **Native-size first blend:** combine the model outputs at photo resolution, with shadow, clipping, colour-shift and highlight safeguards.
+6. **Quality-control second pass:** compare preliminary output against original again; reduce potentially unnatural tone shifts in deep-black regions, highlights and strong detail boundaries; protect the original RGB texture rather than performing aggressive sharpening.
 
-## Quality and speed
+The application shows timing for both neural inferences and total duration. The regional masking and QC passes will add some processing time compared with v0.3.5, intentionally prioritizing natural photographic quality.
 
-- Proven fast independent inference engines from v0.3.4 are retained, but masked mode invokes both once, so expect more runtime than either single engine and less than MIRNet if the phone behaves as before.
-- The new masks avoid abrupt tile/region boundaries and do not re-run inference for every region; there are additional pixel-composition and filter passes.
-- The mask engine does not invent lost detail, reconstruct saturated pixels, perform generative edits, or guarantee higher quality.
-- Reports total processing time plus both model inference times after processing. Compare original, Auto, the two AI modes, and Masked AI on the **same source JPEG**, especially the pink rose, daytime scenes, darker photos, skin tones, foliage and bright skies.
+## What this version does *not* do
 
-## Sources
+No semantic object segmentation or object-specific AI recognition, no separately trained mask network, no invented scene content, and no guarantee of superior results across photographs. The existing training domain of each model is unchanged. Test on identical rose, foliage, backlit subjects, skies, and low-light photos.
 
-- [MobileIE, ICCV 2025](https://github.com/AVC2-UESTC/MobileIE)
-- [Image-Adaptive 3DLUT](https://github.com/HuiZeng/Image-Adaptive-3DLUT)
-
-Both models are downloaded only by GitHub Actions at build time and included offline within the APK. The app does not require internet access.
+Official pretrained source models are fetched during CI builds only, packed in the APK and used completely offline:
+- https://github.com/AVC2-UESTC/MobileIE
+- https://github.com/HuiZeng/Image-Adaptive-3DLUT

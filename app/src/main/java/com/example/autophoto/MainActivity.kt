@@ -179,7 +179,7 @@ class MainActivity : ComponentActivity() {
         // Third independent mode: combines real outputs of both trained
         // networks through multiple edge-aware regional masking passes.
         maskedButton = Button(this).apply {
-            text = "Masked Multi-pass AI"
+            text = "Adaptive Masked AI"
             isAllCaps = false
             textSize = 13f
             minHeight = (48 * resources.displayMetrics.density).roundToInt()
@@ -314,12 +314,12 @@ class MainActivity : ComponentActivity() {
         val source = original ?: return
         scope.launch {
             setBusy(true)
-            info.text = "Masked AI • preparing regional correction…"
+            info.text = "Adaptive Masked AI • analysing regions…"
             try {
                 val output = withContext(Dispatchers.Default) {
                     MaskedAIProcessor.enhance(this@MainActivity, source) { percent ->
                         runOnUiThread {
-                            info.text = "Masked AI • processing " + percent + "%"
+                            info.text = "Adaptive Masked AI • processing " + percent + "%"
                         }
                     }
                 }
@@ -329,7 +329,7 @@ class MainActivity : ComponentActivity() {
                 val total = output.totalMillis / 1000.0
                 val mobileMs = output.mobileInferenceMs / 1000.0
                 val lutMs = output.lutInferenceMs / 1000.0
-                info.text = "Masked AI • " + "%.1f".format(total) + "s total" +
+                info.text = "Adaptive Masked AI • " + "%.1f".format(total) + "s total" +
                     " (MobileIE " + "%.1f".format(mobileMs) +
                     "s / LUT " + "%.1f".format(lutMs) + "s)" +
                     " • tap photo to compare"
