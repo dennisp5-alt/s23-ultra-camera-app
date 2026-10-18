@@ -86,7 +86,7 @@ class MainActivity : ComponentActivity() {
                 corrected = null
                 showOriginal = false
                 image.setImageBitmap(bitmap)
-                info.text = "${bitmap.width} × ${bitmap.height}  •  Tap Auto to correct"
+                info.text = "${bitmap.width} × ${bitmap.height} • Select Polished, Polished+ or Wow"
             } catch (e: Exception) {
                 errorMessage("Cannot open image", e)
             } finally {
@@ -161,7 +161,9 @@ class MainActivity : ComponentActivity() {
             minHeight = (48 * resources.displayMetrics.density).roundToInt()
             setOnClickListener { savePhoto() }
         }
-        for (button in arrayOf(openButton, autoButton, saveButton)) {
+        // Polished-only v0.4.3.1 UI: keep Open/Save, hide the old Auto
+        // button while retaining its original processor untouched in source.
+        for (button in arrayOf(openButton, saveButton)) {
             button.minWidth = 0
             button.setPadding(0, 0, 0, 0)
             button.textSize = 12f
@@ -192,10 +194,8 @@ class MainActivity : ComponentActivity() {
                 marginEnd = pad / 4
             })
         }
-        root.addView(aiControls, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ))
+        // Historical mode row intentionally not attached to the screen.
+        // Its trained models and original actions remain preserved in source.
 
         // Third independent mode: combines real outputs of both trained
         // networks through multiple edge-aware regional masking passes.
@@ -206,13 +206,7 @@ class MainActivity : ComponentActivity() {
             minHeight = (48 * resources.displayMetrics.density).roundToInt()
             setOnClickListener { runMaskedAI() }
         }
-        root.addView(maskedButton, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply {
-            marginStart = pad / 4
-            marginEnd = pad / 4
-        })
+        // Original Adaptive Masked AI remains compiled but hidden.
 
         semanticButton = Button(this).apply {
             text = "Semantic Person AI (v0.3.7)"
@@ -221,13 +215,7 @@ class MainActivity : ComponentActivity() {
             minHeight = (48 * resources.displayMetrics.density).roundToInt()
             setOnClickListener { runSemanticAI() }
         }
-        root.addView(semanticButton, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply {
-            marginStart = pad / 4
-            marginEnd = pad / 4
-        })
+        // Original person segmentation remains compiled but hidden.
         sceneButton = Button(this).apply {
             text = "Scene Semantic AI (v0.3.9)"
             isAllCaps = false
@@ -235,13 +223,7 @@ class MainActivity : ComponentActivity() {
             minHeight = (48 * resources.displayMetrics.density).roundToInt()
             setOnClickListener { runSceneAI() }
         }
-        root.addView(sceneButton, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply {
-            marginStart = pad / 4
-            marginEnd = pad / 4
-        })
+        // Original scene segmentation remains compiled but hidden.
         detailButton = Button(this).apply {
             text = "Run Local Detail (v0.4.1 presets)"
             isAllCaps = false
@@ -249,13 +231,7 @@ class MainActivity : ComponentActivity() {
             minHeight = (48 * resources.displayMetrics.density).roundToInt()
             setOnClickListener { runLocalDetailLab() }
         }
-        root.addView(detailButton, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply {
-            marginStart = pad / 4
-            marginEnd = pad / 4
-        })
+        // v0.4.1 local-detail button remains compiled but hidden.
         // Compact A/B strength controls, separate from the correction action.
         // Changing the preset never reuses a previously edited output.
         val strengthRow = LinearLayout(this).apply {
@@ -286,10 +262,7 @@ class MainActivity : ComponentActivity() {
             "Balanced", LocalDetailProcessor.Strength.BALANCED)
         detailStrongButton = addStrengthButton(
             "Strong", LocalDetailProcessor.Strength.STRONG)
-        root.addView(strengthRow, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ))
+        // Original detail strength row remains available in source only.
         refreshDetailStrengthButtons()
         // New algorithm is independent of the original three v0.4.1 presets.
         // It uses Strong gain locally, with additional soft tone/skin/sky
@@ -301,18 +274,12 @@ class MainActivity : ComponentActivity() {
             minHeight = (48 * resources.displayMetrics.density).roundToInt()
             setOnClickListener { runLocalDetailLab(adaptive = true) }
         }
-        root.addView(detailAdaptiveButton, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply {
-            marginStart = pad / 4
-            marginEnd = pad / 4
-        })
+        // v0.4.2 Adaptive Strong remains compiled but hidden.
 
         // Three A/B finishing looks; each starts from the untouched original
         // and runs the same genuine neural learned LUT before style finishing.
         polishedButton = Button(this).apply {
-            text = "Run Polished AI (v0.4.3)"
+            text = "Run Polished AI"
             isAllCaps = false
             textSize = 13f
             minHeight = (48 * resources.displayMetrics.density).roundToInt()
@@ -356,7 +323,7 @@ class MainActivity : ComponentActivity() {
         ))
         refreshPolishedButtons()
         info = TextView(this).apply {
-            text = "Choose a photo to start"
+            text = "Open a photo, choose a look, then run Polished AI"
             gravity = Gravity.CENTER
             setPadding(0, pad / 2, 0, pad / 2)
         }
@@ -371,7 +338,7 @@ class MainActivity : ComponentActivity() {
             gravity = Gravity.CENTER
             setPadding(pad / 2, pad / 3, pad / 2, pad / 2)
             setTextIsSelectable(true)
-            contentDescription = "Scene AI segmentation results and diagnostic status"
+            contentDescription = "Polished AI processing results"
         }
         root.addView(sceneDiagnostics, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
