@@ -1,7 +1,7 @@
-name: Build AutoPhoto Quality Lab v0.4.1
+name: Build AutoPhoto Quality Lab v0.4.2
 on:
   push:
-    branches: [autophoto-quality-lab-v041]
+    branches: [autophoto-quality-lab-v042]
   workflow_dispatch:
 permissions:
   contents: write
@@ -72,15 +72,18 @@ jobs:
           ui=Path("app/src/main/java/com/example/autophoto/MainActivity.kt").read_text()
           assert all(t in p for t in ["enum class Strength", "GENTLE(", "BALANCED(", "STRONG(", "inputMeanY", "outputMeanY"])
           assert "LocalDetailProcessor.enhance(source, preset)" in ui
+          assert "LocalDetailProcessor.enhanceAdaptiveStrong(source)" in ui
+          assert "fun enhanceAdaptiveStrong(" in p
+          assert "localMinimumY" in p and "skinGuide" in p and "skyGuide" in p
           assert all(t in ui for t in ["ImageProcessor.correct(input)", "MaskedAIProcessor.enhanceScene", "detailProgressActive = false"])
-          assert "applicationId = \"com.example.autophoto.qualitylab.v041\"" in Path("app/build.gradle.kts").read_text()
+          assert "applicationId = \"com.example.autophoto.qualitylab.v042\"" in Path("app/build.gradle.kts").read_text()
           print("Three selectable presets, original Auto, scene engine, and isolated app ID verified")
           PY
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AutoPhoto-Quality-Lab-v0.4.1-APK
+          name: AutoPhoto-Quality-Lab-v0.4.2-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
@@ -88,19 +91,19 @@ jobs:
         if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: autophoto-quality-lab-v0.4.1
-          name: AutoPhoto Quality Lab v0.4.1 — Three-strength Edge-aware Local Detail
+          tag_name: autophoto-quality-lab-v0.4.2
+          name: AutoPhoto Quality Lab v0.4.2 — Adaptive Strong Local Detail
           make_latest: false
           generate_release_notes: false
           body: |
-            Separate quality-first experiment, based on working v0.3.9.1.
-            Independent update to the successful v0.4.0 local-detail experiment.
-            Adds Gentle, Balanced and Strong, each computed from the untouched
-            original photo; improved texture-sensitive local enhancement and
-            clipping/halo/highlight/bokeh/skin/red-flower safeguards.
-            Fixes stale 100% progress display. Adds input/output luminance
-            metrics calculated before JPEG export for image comparison.
-            All Auto and neural AI modes unchanged, fully offline.
+            Experimental update to v0.4.1; all previous apps remain installed.
+            Adaptive Strong Detail v0.4.2 as a new separate button,
+            retaining Gentle/Balanced/Strong comparisons unchanged.
+            Soft tonal sky and warm skin guides guard sensitive edges.
+            Additional local extrema safeguard rejects new sharpening halos.
+            Offline, original resolution, true neural AI modes unaffected.
+            Compare Strong vs Adaptive Strong on bottlebrush, powerlines,
+            portrait, water, rose and foliage before choosing.
           files: app/build/outputs/apk/debug/*.apk
           fail_on_unmatched_files: true
           overwrite_files: true

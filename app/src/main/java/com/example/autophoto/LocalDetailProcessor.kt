@@ -42,7 +42,9 @@ object LocalDetailProcessor {
         val inputMeanY: Float,
         val outputMeanY: Float,
         val maximumAbsoluteYShift: Float,
-        val strength: Strength
+        val strength: Strength,
+        val adaptiveStrong: Boolean = false,
+        val boundaryLimitedPercent: Float = 0f
     )
 
     private const val ANALYSIS_LONG_EDGE = 1024
@@ -73,8 +75,22 @@ object LocalDetailProcessor {
         return upper * (1f - dy) + lower * dy
     }
 
+    /**
+     * Version 0.4.1 A/B presets retained exactly, for reliable regression.
+     * New v0.4.2 mode is a separate experimental Strong adaptation.
+     * All calls use original source pixels, never prior corrections.
+     */
     fun enhance(source: Bitmap, strength: Strength = Strength.BALANCED,
-                progress: (Int) -> Unit): Result {
+                progress: (Int) -> Unit): Result =
+        enhanceInternal(source, strength, false, progress)
+
+    fun enhanceAdaptiveStrong(source: Bitmap,
+                              progress: (Int) -> Unit): Result =
+        enhanceInternal(source, Strength.STRONG, true, progress)
+
+    private fun enhanceInternal(source: Bitmap, strength: Strength,
+                                adaptive: Boolean,
+                                progress: (Int) -> Unit): Result {
         require(source.width > 0 && source.height > 0)
         val started = SystemClock.elapsedRealtime()
         progress(1)
@@ -92,6 +108,12 @@ object LocalDetailProcessor {
         val lowLuma = FloatArray(small.size) { i -> y(small[i]) }
         val base = FloatArray(small.size)
         val texture = FloatArray(small.size)
+        // Only the new adaptive mode allocates softly-varying guides. They
+        // are tonal/chroma contextual estimates, not semantic segmentation.
+        // Neighbourhood smoothing protects power lines silhouetted against
+        // sky as well as nearby warm skin and gradual cloud boundaries.
+        val skyGuide = if (adaptive) FloatArray(small.size) else null
+        val skinGuide = if (adaptive) FloatArray(small.size) else null
         var trusted = 0
         // A 5x5 spatial/range guided luminance estimate distinguishes
         // out-of-focus smooth regions from actual middle-frequency detail.
@@ -137,10 +159,65 @@ object LocalDetailProcessor {
                     (1f - 0.50f * ease((sigma - 48f) / 68f))
                 texture[i] = contrastMask.coerceIn(0f, 1f)
                 base[i] = weightedY / weightedSum.coerceAtLeast(0.0001f)
+                if (adaptive) {
+                    val p = small[i]
+                    val red = ((p shr 16) and 255).toFloat()
+                    val green = ((p shr 8) and 255).toFloat()
+                    val blue = (p and 255).toFloat()
+                    val hi = max(red, max(green, blue))
+                    val lo = min(red, min(green, blue))
+                    val chroma = (hi-lo)/hi.coerceAtLeast(1f)
+                    val upper = 1f - ease((row.toFloat()/h - 0.38f)/0.27f)
+                    // Soft bright blue / pale neutral upper-frame candidate.
+                    // Works on the sky side of thin power-line boundaries;
+                    // deliberately does not classify dark trees as sky.
+                    val blueSky = ease((blue-red+10f)/39f) *
+                        ease((blue-green+8f)/37f) *
+                        ease((centre-67f)/70f)
+                    val paleCloud = (1f - ease((chroma-0.12f)/0.25f)) *
+                        ease((centre-117f)/105f)
+                    skyGuide?.set(i,upper*max(blueSky,paleCloud)
+                        .coerceIn(0f,1f))
+                    // Broad warm flesh-like colour confidence, later spatially
+                    // smoothed: protect facial texture and adjacent boundaries.
+                    // It is NOT a neural person or face segmentation mask.
+                    val warmHue = ease((red-green-5f)/42f) *
+                        ease((green-blue-3f)/38f)
+                    val skinChroma = ease((chroma-0.07f)/0.15f) *
+                        (1f-ease((chroma-0.53f)/0.22f))
+                    val skinLightness = ease((centre-45f)/65f) *
+                        (1f-ease((centre-220f)/40f))
+                    skinGuide?.set(i,warmHue*skinChroma*skinLightness)
+                }
                 if (contrastMask > 0.22f) trusted++
             }
             if (row % 32 == 0) progress(3 + (28.0 * row / h).roundToInt())
         }
+        // Blur the candidate confidence rather than the photograph.
+        // Soft 5x5 weighting prevents hard changes across skin edges
+        // or power lines while retaining native-resolution detail.
+        fun smoothGuide(guide: FloatArray?): FloatArray? {
+            if (guide == null) return null
+            val out = FloatArray(guide.size)
+            for (cy in 0 until h) for (cx in 0 until w) {
+                var total = 0f
+                var weight = 0f
+                for (dy in -2..2) {
+                    val py = (cy + dy).coerceIn(0,h-1)
+                    for (dx in -2..2) {
+                        val px = (cx + dx).coerceIn(0,w-1)
+                        val k = if (dx == 0 && dy == 0) 3f else
+                            if (dx*dx + dy*dy <= 2) 2f else 1f
+                        total += guide[py*w+px] * k
+                        weight += k
+                    }
+                }
+                out[cy*w+cx] = total/weight
+            }
+            return out
+        }
+        val skySoft = smoothGuide(skyGuide)
+        val skinSoft = smoothGuide(skinGuide)
         progress(33)
 
         // Source pixels held once; output is written row-wise to avoid a
@@ -154,6 +231,7 @@ object LocalDetailProcessor {
         var totalOriginalY = 0.0
         var totalEnhancedY = 0.0
         var maximumApplied = 0f
+        var boundaryLimited = 0L
         val minSrc = 4f
         val maxSrc = 251f
 
@@ -177,6 +255,10 @@ object LocalDetailProcessor {
                 val sat = (high - low) / high.coerceAtLeast(1f)
                 val mapX = (sx + 0.5f) * w / w0 - 0.5f
                 val mask = sample(texture, w, h, mapX, mapY)
+                val skyContext = if (skySoft != null)
+                    sample(skySoft,w,h,mapX,mapY) else 0f
+                val skinContext = if (skinSoft != null)
+                    sample(skinSoft,w,h,mapX,mapY) else 0f
 
                 // Mask known high-risk areas with continuous thresholds:
                 // saturated bottlebrush reds, warm skin-like colours,
@@ -193,9 +275,16 @@ object LocalDetailProcessor {
                 val shadowProtection = ease((lum - 15f) / 57f)
                 val highlightProtection = 1f - 0.76f *
                     ease((lum - 170f) / 80f)
+                // In Adaptive Strong, keep the *original Strong gain* in
+                // trustworthy detail while down-weighting sky/cloud softness,
+                // warm portrait skin and visually sensitive boundaries.
+                val adaptiveProtection = if (adaptive)
+                    ((1f - 0.72f*skyContext) *
+                        (1f - 0.63f*skinContext)).coerceIn(0.18f,1f)
+                    else 1f
                 val protectedMask = mask * saturatedColourProtection *
                     redFlower * warmSkinLike * shadowProtection *
-                    highlightProtection
+                    highlightProtection * adaptiveProtection
 
                 if (protectedMask < 0.006f) {
                     row[sx] = p
@@ -208,11 +297,17 @@ object LocalDetailProcessor {
                 var weightedY = 0f
                 var weightedSum = 0f
                 var strongestEdge = 0f
+                var localMinimumY = lum
+                var localMaximumY = lum
                 for (dy in -1..1) {
                     val py = (sy + dy).coerceIn(0, h0 - 1)
                     for (dx in -1..1) {
                         val px = (sx + dx).coerceIn(0, w0 - 1)
                         val neighbor = y(pixels[py * w0 + px])
+                        if (adaptive) {
+                            localMinimumY = min(localMinimumY,neighbor)
+                            localMaximumY = max(localMaximumY,neighbor)
+                        }
                         val delta = neighbor - lum
                         strongestEdge = max(strongestEdge, abs(delta))
                         val spatial = if (dy == 0 && dx == 0) 4f
@@ -226,8 +321,11 @@ object LocalDetailProcessor {
                 }
                 val fineDetail = lum - weightedY / weightedSum
                 val mediumDetail = lum - sample(base, w, h, mapX, mapY)
-                val edgeSafety = 1f - 0.65f *
-                    ease((strongestEdge - 25f) / 78f)
+                val edgeSafety = (1f - 0.65f *
+                    ease((strongestEdge - 25f) / 78f)) *
+                    (if (adaptive) 1f - 0.60f *
+                        skyContext * ease((strongestEdge-19f)/54f)
+                     else 1f)
 
                 // Adaptive fine detail threshold: suppress low-amplitude
                 // random pixel noise while retaining genuine bright/dark
@@ -255,9 +353,21 @@ object LocalDetailProcessor {
                 // corrections that would push that channel further out.
                 val minimumDelta = min(0f, minSrc - low)
                 val maximumDelta = max(0f, maxSrc - high)
-                val delta = raw.coerceIn(-strength.maxShift,
+                val clipped = raw.coerceIn(-strength.maxShift,
                     strength.maxShift)
                     .coerceIn(minimumDelta, maximumDelta)
+                // Additional halo rejector, adaptive only: avoid creating
+                // isolated luminance extrema more than 2/255 beyond the
+                // original 3x3 neighbourhood. Strong v0.4.1 unchanged.
+                val delta = if (adaptive) {
+                    val haloMargin = 1.4f + 1.0f *
+                        (1f-skyContext) * ease(mask)
+                    val safe = clipped.coerceIn(
+                        localMinimumY - haloMargin - lum,
+                        localMaximumY + haloMargin - lum)
+                    if (abs(safe-clipped)>0.05f) boundaryLimited++
+                    safe
+                } else clipped
                 val rr = (r + delta).roundToInt().coerceIn(0, 255)
                 val gg = (g + delta).roundToInt().coerceIn(0, 255)
                 val bb = (b + delta).roundToInt().coerceIn(0, 255)
@@ -288,7 +398,9 @@ object LocalDetailProcessor {
             inputMeanY = (totalOriginalY / pixelsCount).toFloat(),
             outputMeanY = (totalEnhancedY / pixelsCount).toFloat(),
             maximumAbsoluteYShift = maximumApplied,
-            strength = strength
+            strength = strength,
+            adaptiveStrong = adaptive,
+            boundaryLimitedPercent = 100f * boundaryLimited / pixelsCount
         )
     }
 }

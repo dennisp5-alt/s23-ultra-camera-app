@@ -59,7 +59,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var detailGentleButton: Button
     private lateinit var detailBalancedButton: Button
     private lateinit var detailStrongButton: Button
-    private var detailStrength = LocalDetailProcessor.Strength.BALANCED
+    private lateinit var detailAdaptiveButton: Button
+    // User-preferred Strong is the new default; original Gentle/Balanced/
+    // Strong run unchanged for an A/B regression comparison.
+    private var detailStrength = LocalDetailProcessor.Strength.STRONG
     private var detailProgressActive = false
     private lateinit var saveButton: Button
 
@@ -234,7 +237,7 @@ class MainActivity : ComponentActivity() {
             marginEnd = pad / 4
         })
         detailButton = Button(this).apply {
-            text = "Run Local Detail Lab (v0.4.1)"
+            text = "Run Local Detail (v0.4.1 presets)"
             isAllCaps = false
             textSize = 13f
             minHeight = (48 * resources.displayMetrics.density).roundToInt()
@@ -282,6 +285,23 @@ class MainActivity : ComponentActivity() {
             LinearLayout.LayoutParams.WRAP_CONTENT
         ))
         refreshDetailStrengthButtons()
+        // New algorithm is independent of the original three v0.4.1 presets.
+        // It uses Strong gain locally, with additional soft tone/skin/sky
+        // boundary protection and a no-new-extrema safeguard.
+        detailAdaptiveButton = Button(this).apply {
+            text = "Adaptive Strong Detail (v0.4.2)"
+            isAllCaps = false
+            textSize = 13f
+            minHeight = (48 * resources.displayMetrics.density).roundToInt()
+            setOnClickListener { runLocalDetailLab(adaptive = true) }
+        }
+        root.addView(detailAdaptiveButton, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            marginStart = pad / 4
+            marginEnd = pad / 4
+        })
 
         info = TextView(this).apply {
             text = "Choose a photo to start"
@@ -360,6 +380,7 @@ class MainActivity : ComponentActivity() {
         detailGentleButton.isEnabled = !busy && original != null
         detailBalancedButton.isEnabled = !busy && original != null
         detailStrongButton.isEnabled = !busy && original != null
+        detailAdaptiveButton.isEnabled = !busy && original != null
         saveButton.isEnabled = !busy && corrected != null
     }
 
@@ -557,20 +578,30 @@ class MainActivity : ComponentActivity() {
      * Experimental local luminance contrast/detail path. Runs independent of
      * original Auto, MobileIE, LUT, Masked AI, ML Kit and scene segmentation.
      */
-    private fun runLocalDetailLab() {
+    private fun runLocalDetailLab(adaptive: Boolean = false) {
         val source = original ?: return
-        val preset = detailStrength
+        val preset = if (adaptive)
+            LocalDetailProcessor.Strength.STRONG else detailStrength
+        val label = if (adaptive) "Adaptive Strong" else preset.label
         scope.launch {
             setBusy(true)
             detailProgressActive = true
             sceneDiagnostics.visibility = View.VISIBLE
-            sceneDiagnostics.text = "Quality Lab " + preset.label +
+            sceneDiagnostics.text = "Quality Lab " + label +
                 " • analysing original image texture…"
-            info.text = "Local Detail Lab " + preset.label +
+            info.text = "Local Detail Lab " + label +
                 " • preparing edge-aware enhancement…"
             try {
                 val result = withContext(Dispatchers.Default) {
-                    LocalDetailProcessor.enhance(source, preset) { percent ->
+                    if (adaptive) {
+                        LocalDetailProcessor.enhanceAdaptiveStrong(source) { percent ->
+                            runOnUiThread {
+                                if (detailProgressActive) {
+                                    info.text = "Adaptive Strong • processing " + percent + "%"
+                                }
+                            }
+                        }
+                    } else LocalDetailProcessor.enhance(source, preset) { percent ->
                         // Callbacks can arrive after the coroutine completes.
                         // Suppress stale 100% callbacks overwriting "complete".
                         runOnUiThread {
@@ -586,7 +617,9 @@ class MainActivity : ComponentActivity() {
                 showOriginal = false
                 image.setImageBitmap(result.bitmap)
                 val sec = result.elapsedMs / 1000.0
-                sceneDiagnostics.text = "Local Detail Lab v0.4.1" +
+                sceneDiagnostics.text = (if (result.adaptiveStrong)
+                    "Adaptive Strong Detail v0.4.2" else
+                    "Original Local Detail v0.4.1") +
                     " • " + result.strength.label + "\n" +
                     "Duration: " + "%.1f".format(sec) + "s" +
                     " • Pixels changed: " +
@@ -599,9 +632,12 @@ class MainActivity : ComponentActivity() {
                     "%.2f".format(result.inputMeanY) + " → " +
                     "%.2f".format(result.outputMeanY) +
                     " • Texture mask: " +
-                    "%.1f".format(result.maskPercent) + "%"
+                    "%.1f".format(result.maskPercent) + "%" +
+                    (if (result.adaptiveStrong) "\nBoundary protection: " +
+                        "%.1f".format(result.boundaryLimitedPercent) +
+                        "% of pixels limited" else "")
                 sceneDiagnostics.visibility = View.VISIBLE
-                info.text = "Local Detail Lab " + preset.label +
+                info.text = "Local Detail Lab " + label +
                     " complete — tap photo to compare"
             } catch (e: Exception) {
                 detailProgressActive = false
