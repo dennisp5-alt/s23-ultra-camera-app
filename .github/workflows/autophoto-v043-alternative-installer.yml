@@ -1,0 +1,74 @@
+name: Verify and provide compressed AutoPhoto v0.4.3 installer
+on:
+  push:
+    branches: [autophoto-v043-installer-support]
+    paths: [.github/workflows/autophoto-v043-alternative-installer.yml]
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: write
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download exactly the successful original v0.4.3 APK
+        uses: actions/download-artifact@v4
+        with:
+          name: AutoPhoto-Polished-AI-Lab-v0.4.3-APK
+          repository: ${{ github.repository }}
+          run-id: 39129628036
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: installer
+      - name: Validate APK integrity, manifest and signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lah installer
+          APK=$(find installer -name '*.apk' -type f | head -1)
+          test -n "$APK"
+          test "$(stat -c %s "$APK")" -gt 200000000
+          unzip -tq "$APK" | tail -1
+          echo "APK SHA256:"
+          sha256sum "$APK"
+          SDK="$ANDROID_HOME"
+          APKSIGNER=$(find "$SDK/build-tools" -name apksigner -type f | sort -V | tail -1)
+          AAPT=$(find "$SDK/build-tools" -name aapt -type f | sort -V | tail -1)
+          if [ -z "$APKSIGNER" ] || [ -z "$AAPT" ]; then
+            echo "::error::Missing Android build tools"; exit 1
+          fi
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          "$AAPT" dump badging "$APK" | head -8
+          "$AAPT" dump badging "$APK" | grep -F "package: name='com.example.autophoto.polished.v043'"
+          python3 - "$APK" <<'PY'
+          import zipfile,sys
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              for name in (
+                  "assets/mobileie_lolv1.tflite",
+                  "assets/lut_classifier.onnx",
+                  "assets/lut_basis_33.bin",
+                  "assets/skywater_segformer_b2_fp32.onnx"):
+                  assert z.getinfo(name).file_size > 10000
+          print("All pretrained offline model files present")
+          PY
+      - name: Create alternative installer ZIP without modifying APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p publish
+          cp installer/*.apk publish/AutoPhoto_Polished_AI_v0.4.3.apk
+          sha256sum publish/AutoPhoto_Polished_AI_v0.4.3.apk > publish/SHA256SUMS.txt
+          echo 'Unzip and install AutoPhoto_Polished_AI_v0.4.3.apk through My Files on Android. The ZIP contains the exact APK from the original successful release, not a new or different build.' > publish/INSTALL.txt
+          cd publish
+          zip -9 -q AutoPhoto_Polished_AI_v0.4.3_Alternative_Installer.zip AutoPhoto_Polished_AI_v0.4.3.apk SHA256SUMS.txt INSTALL.txt
+          unzip -tq AutoPhoto_Polished_AI_v0.4.3_Alternative_Installer.zip
+          ls -lah AutoPhoto_Polished_AI_v0.4.3_Alternative_Installer.zip
+      - name: Attach alternative ZIP to existing public GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: autophoto-polished-lab-v0.4.3
+          name: AutoPhoto Polished AI Lab v0.4.3
+          make_latest: false
+          generate_release_notes: false
+          files: publish/AutoPhoto_Polished_AI_v0.4.3_Alternative_Installer.zip
+          fail_on_unmatched_files: true
+          overwrite_files: true
