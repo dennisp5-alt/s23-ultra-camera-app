@@ -24,12 +24,25 @@ import kotlin.math.sqrt
  * Source image and all prior processing engines are never mutated.
  */
 object LocalDetailProcessor {
+    // Strength scales signal-dependent detail adjustments. Each rerun
+    // always starts from the original decoded photo, never from a prior
+    // candidate enhancement.
+    enum class Strength(val label: String, val gain: Float, val maxShift: Float) {
+        GENTLE("Gentle", 1.2f, 4.0f),
+        BALANCED("Balanced", 2.5f, 7.0f),
+        STRONG("Strong", 4.0f, 10.0f)
+    }
+
     data class Result(
         val bitmap: Bitmap,
         val elapsedMs: Long,
         val meanAbsLumaChange: Float,
         val changedPercent: Float,
-        val maskPercent: Float
+        val maskPercent: Float,
+        val inputMeanY: Float,
+        val outputMeanY: Float,
+        val maximumAbsoluteYShift: Float,
+        val strength: Strength
     )
 
     private const val ANALYSIS_LONG_EDGE = 1024
@@ -60,7 +73,8 @@ object LocalDetailProcessor {
         return upper * (1f - dy) + lower * dy
     }
 
-    fun enhance(source: Bitmap, progress: (Int) -> Unit): Result {
+    fun enhance(source: Bitmap, strength: Strength = Strength.BALANCED,
+                progress: (Int) -> Unit): Result {
         require(source.width > 0 && source.height > 0)
         val started = SystemClock.elapsedRealtime()
         progress(1)
@@ -119,8 +133,8 @@ object LocalDetailProcessor {
                 // Very flat areas are probably natural bokeh or sky.
                 // Extremely busy edges receive less amplification to avoid
                 // high-contrast halos around petals, filaments and windows.
-                val contrastMask = ease((sigma - 4.0f) / 12f) *
-                    (1f - 0.68f * ease((sigma - 43f) / 63f))
+                val contrastMask = ease((sigma - 3.0f) / 10f) *
+                    (1f - 0.50f * ease((sigma - 48f) / 68f))
                 texture[i] = contrastMask.coerceIn(0f, 1f)
                 base[i] = weightedY / weightedSum.coerceAtLeast(0.0001f)
                 if (contrastMask > 0.22f) trusted++
@@ -137,6 +151,9 @@ object LocalDetailProcessor {
         val row = IntArray(w0)
         var changed: Long = 0L
         var totalAbs = 0.0
+        var totalOriginalY = 0.0
+        var totalEnhancedY = 0.0
+        var maximumApplied = 0f
         val minSrc = 4f
         val maxSrc = 251f
 
@@ -154,6 +171,7 @@ object LocalDetailProcessor {
                 val g = ((p shr 8) and 255).toFloat()
                 val b = (p and 255).toFloat()
                 val lum = y(p)
+                totalOriginalY += lum
                 val high = max(r, max(g, b))
                 val low = min(r, min(g, b))
                 val sat = (high - low) / high.coerceAtLeast(1f)
@@ -163,24 +181,25 @@ object LocalDetailProcessor {
                 // Mask known high-risk areas with continuous thresholds:
                 // saturated bottlebrush reds, warm skin-like colours,
                 // highlights, near-black texture, and blurred background.
-                val saturatedColourProtection = 1f - 0.75f *
-                    ease((sat - 0.47f) / 0.35f)
+                val saturatedColourProtection = 1f - 0.57f *
+                    ease((sat - 0.51f) / 0.38f)
                 val redFlower = if (r > g + 38f && r > b + 24f)
-                    (1f - 0.58f * ease((r - max(g, b) - 28f) / 50f))
+                    (1f - 0.43f * ease((r - max(g, b) - 28f) / 50f))
                     else 1f
                 val warmSkinLike = if (r > g + 9f &&
                     g > b + 6f && r > 80f)
-                    1f - 0.44f * ease((r - b - 17f) / 90f)
+                    1f - 0.47f * ease((r - b - 17f) / 90f)
                     else 1f
                 val shadowProtection = ease((lum - 15f) / 57f)
-                val highlightProtection = 1f - 0.86f *
-                    ease((lum - 169f) / 75f)
+                val highlightProtection = 1f - 0.76f *
+                    ease((lum - 170f) / 80f)
                 val protectedMask = mask * saturatedColourProtection *
                     redFlower * warmSkinLike * shadowProtection *
                     highlightProtection
 
-                if (protectedMask < 0.012f) {
+                if (protectedMask < 0.006f) {
                     row[sx] = p
+                    totalEnhancedY += lum
                     continue
                 }
 
@@ -207,21 +226,37 @@ object LocalDetailProcessor {
                 }
                 val fineDetail = lum - weightedY / weightedSum
                 val mediumDetail = lum - sample(base, w, h, mapX, mapY)
-                val edgeSafety = 1f - 0.87f *
-                    ease((strongestEdge - 23f) / 60f)
+                val edgeSafety = 1f - 0.65f *
+                    ease((strongestEdge - 25f) / 78f)
 
-                // No histogram stretching or colour-chroma changes.
-                // Confine luminance increase/decrease to a few levels;
-                // never invent extra detail with unsharp-mask ringing.
-                val raw = (0.32f * fineDetail.coerceIn(-12f, 12f) +
-                    0.14f * mediumDetail.coerceIn(-22f, 22f)) *
-                    protectedMask * edgeSafety
+                // Adaptive fine detail threshold: suppress low-amplitude
+                // random pixel noise while retaining genuine bright/dark
+                // flower filament edges. Smooth natural bokeh gets almost
+                // zero strength because the analysis texture mask is weak.
+                val fineNoiseFloor = 0.75f + (1f - mask) * 1.65f
+                val fineMagnitude = (abs(fineDetail) -
+                    fineNoiseFloor).coerceAtLeast(0f)
+                val fineSignal = if (fineDetail < 0f)
+                    -fineMagnitude else fineMagnitude
+
+                // Decouple medium/local contrast from pixel-level sharpness
+                // to avoid purely noise-driven enhancement.
+                val midSignal = (abs(mediumDetail) - 1.25f)
+                    .coerceAtLeast(0f).coerceAtMost(20f) *
+                    if (mediumDetail < 0f) -1f else 1f
+                val textureConfidence = (0.72f +
+                    0.28f * ease(fineMagnitude / 9f))
+                    .coerceIn(0f, 1f)
+                val raw = (0.78f * fineSignal.coerceIn(-15f, 15f) +
+                    0.34f * midSignal) * strength.gain *
+                    textureConfidence * protectedMask * edgeSafety
                 // If a source channel is already outside the chosen
                 // safety range, do not force it inward: refuse only those
                 // corrections that would push that channel further out.
                 val minimumDelta = min(0f, minSrc - low)
                 val maximumDelta = max(0f, maxSrc - high)
-                val delta = raw.coerceIn(-6f, 6f)
+                val delta = raw.coerceIn(-strength.maxShift,
+                    strength.maxShift)
                     .coerceIn(minimumDelta, maximumDelta)
                 val rr = (r + delta).roundToInt().coerceIn(0, 255)
                 val gg = (g + delta).roundToInt().coerceIn(0, 255)
@@ -232,6 +267,8 @@ object LocalDetailProcessor {
                 val applied = 0.2126f * (rr - r) +
                     0.7152f * (gg - g) + 0.0722f * (bb - b)
                 totalAbs += abs(applied).toDouble()
+                totalEnhancedY += lum + applied
+                maximumApplied = max(maximumApplied, abs(applied))
                 if (rr.toFloat() != r || gg.toFloat() != g ||
                     bb.toFloat() != b) changed++
             }
@@ -247,7 +284,11 @@ object LocalDetailProcessor {
             elapsedMs = SystemClock.elapsedRealtime() - started,
             meanAbsLumaChange = (totalAbs / pixelsCount).toFloat(),
             changedPercent = 100f * changed / pixelsCount,
-            maskPercent = 100f * trusted / small.size.coerceAtLeast(1)
+            maskPercent = 100f * trusted / small.size.coerceAtLeast(1),
+            inputMeanY = (totalOriginalY / pixelsCount).toFloat(),
+            outputMeanY = (totalEnhancedY / pixelsCount).toFloat(),
+            maximumAbsoluteYShift = maximumApplied,
+            strength = strength
         )
     }
 }

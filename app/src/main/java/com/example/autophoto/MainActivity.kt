@@ -56,6 +56,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var semanticButton: Button
     private lateinit var sceneButton: Button
     private lateinit var detailButton: Button
+    private lateinit var detailGentleButton: Button
+    private lateinit var detailBalancedButton: Button
+    private lateinit var detailStrongButton: Button
+    private var detailStrength = LocalDetailProcessor.Strength.BALANCED
+    private var detailProgressActive = false
     private lateinit var saveButton: Button
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -229,7 +234,7 @@ class MainActivity : ComponentActivity() {
             marginEnd = pad / 4
         })
         detailButton = Button(this).apply {
-            text = "Local Detail Lab (v0.4.0)"
+            text = "Run Local Detail Lab (v0.4.1)"
             isAllCaps = false
             textSize = 13f
             minHeight = (48 * resources.displayMetrics.density).roundToInt()
@@ -242,6 +247,42 @@ class MainActivity : ComponentActivity() {
             marginStart = pad / 4
             marginEnd = pad / 4
         })
+        // Compact A/B strength controls, separate from the correction action.
+        // Changing the preset never reuses a previously edited output.
+        val strengthRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        fun addStrengthButton(
+            label: String, preset: LocalDetailProcessor.Strength
+        ): Button {
+            val button = Button(this).apply {
+                text = label
+                isAllCaps = false
+                textSize = 11f
+                minHeight = (40 * resources.displayMetrics.density).roundToInt()
+                setOnClickListener {
+                    detailStrength = preset
+                    refreshDetailStrengthButtons()
+                }
+            }
+            strengthRow.addView(button, LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+            ))
+            return button
+        }
+        detailGentleButton = addStrengthButton(
+            "Gentle", LocalDetailProcessor.Strength.GENTLE)
+        detailBalancedButton = addStrengthButton(
+            "Balanced", LocalDetailProcessor.Strength.BALANCED)
+        detailStrongButton = addStrengthButton(
+            "Strong", LocalDetailProcessor.Strength.STRONG)
+        root.addView(strengthRow, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
+        refreshDetailStrengthButtons()
+
         info = TextView(this).apply {
             text = "Choose a photo to start"
             gravity = Gravity.CENTER
@@ -292,6 +333,20 @@ class MainActivity : ComponentActivity() {
         setBusy(false)
     }
 
+    private fun refreshDetailStrengthButtons() {
+        fun mark(button: Button, selected: Boolean, label: String) {
+            button.text = if (selected) "✓ " + label else label
+            button.alpha = if (selected) 1f else 0.62f
+            button.isSelected = selected
+        }
+        mark(detailGentleButton,
+            detailStrength == LocalDetailProcessor.Strength.GENTLE, "Gentle")
+        mark(detailBalancedButton,
+            detailStrength == LocalDetailProcessor.Strength.BALANCED, "Balanced")
+        mark(detailStrongButton,
+            detailStrength == LocalDetailProcessor.Strength.STRONG, "Strong")
+    }
+
     private fun setBusy(busy: Boolean) {
         progress.visibility = if (busy) View.VISIBLE else View.GONE
         openButton.isEnabled = !busy
@@ -302,6 +357,9 @@ class MainActivity : ComponentActivity() {
         semanticButton.isEnabled = !busy && original != null
         sceneButton.isEnabled = !busy && original != null
         detailButton.isEnabled = !busy && original != null
+        detailGentleButton.isEnabled = !busy && original != null
+        detailBalancedButton.isEnabled = !busy && original != null
+        detailStrongButton.isEnabled = !busy && original != null
         saveButton.isEnabled = !busy && corrected != null
     }
 
@@ -501,38 +559,58 @@ class MainActivity : ComponentActivity() {
      */
     private fun runLocalDetailLab() {
         val source = original ?: return
+        val preset = detailStrength
         scope.launch {
             setBusy(true)
+            detailProgressActive = true
             sceneDiagnostics.visibility = View.VISIBLE
-            sceneDiagnostics.text = "Quality Lab • analysing existing image texture…"
-            info.text = "Quality Lab • preparing edge-aware enhancement…"
+            sceneDiagnostics.text = "Quality Lab " + preset.label +
+                " • analysing original image texture…"
+            info.text = "Local Detail Lab " + preset.label +
+                " • preparing edge-aware enhancement…"
             try {
                 val result = withContext(Dispatchers.Default) {
-                    LocalDetailProcessor.enhance(source) { percent ->
+                    LocalDetailProcessor.enhance(source, preset) { percent ->
+                        // Callbacks can arrive after the coroutine completes.
+                        // Suppress stale 100% callbacks overwriting "complete".
                         runOnUiThread {
-                            info.text = "Local Detail Lab • processing " + percent + "%"
+                            if (detailProgressActive) {
+                                info.text = "Local Detail Lab " + preset.label +
+                                    " • processing " + percent + "%"
+                            }
                         }
                     }
                 }
+                detailProgressActive = false
                 corrected = result.bitmap
                 showOriginal = false
                 image.setImageBitmap(result.bitmap)
                 val sec = result.elapsedMs / 1000.0
-                sceneDiagnostics.text = "Local Detail Lab v0.4.0" + "\n" +
+                sceneDiagnostics.text = "Local Detail Lab v0.4.1" +
+                    " • " + result.strength.label + "\n" +
                     "Duration: " + "%.1f".format(sec) + "s" +
-                    " • Pixels changed: " + "%.1f".format(result.changedPercent) + "%" +
-                    "\n" + "Average luminance change: " +
-                    "%.2f".format(result.meanAbsLumaChange) +
-                    "/255 • Texture mask: " +
+                    " • Pixels changed: " +
+                    "%.1f".format(result.changedPercent) + "%" +
+                    "\n" + "Average absolute luminance change: " +
+                    "%.2f".format(result.meanAbsLumaChange) + "/255" +
+                    " • Max: " +
+                    "%.1f".format(result.maximumAbsoluteYShift) + "/255" +
+                    "\n" + "Same decoded source brightness: " +
+                    "%.2f".format(result.inputMeanY) + " → " +
+                    "%.2f".format(result.outputMeanY) +
+                    " • Texture mask: " +
                     "%.1f".format(result.maskPercent) + "%"
                 sceneDiagnostics.visibility = View.VISIBLE
-                info.text = "Local Detail Lab complete — tap photo to compare"
+                info.text = "Local Detail Lab " + preset.label +
+                    " complete — tap photo to compare"
             } catch (e: Exception) {
+                detailProgressActive = false
                 sceneDiagnostics.text = "Local Detail Lab failed: " +
                     (e.localizedMessage ?: e.javaClass.simpleName)
                 sceneDiagnostics.visibility = View.VISIBLE
                 errorMessage("Local Detail Lab failed", e)
             } finally {
+                detailProgressActive = false
                 setBusy(false)
             }
         }
