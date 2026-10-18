@@ -10,7 +10,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /**
- * AutoPhoto Polished AI Lab v0.4.3
+ * AutoPhoto Polished Impact Lab v0.4.4 (Polished baseline unchanged)
  *
  * Original / neural-LUT fusion -> scene-dependent filmic tone curve ->
  * vibrance and colour separation -> softly masked, edge-limited texture pop.
@@ -57,6 +57,22 @@ object PolishedAIProcessor {
         0.2126f * ((p shr 16) and 255) +
         0.7152f * ((p shr 8) and 255) +
         0.0722f * (p and 255)
+
+    /**
+     * Gamut mapping: preserve the target luminance and RGB hue direction by
+     * reducing chroma together, not clipping channels individually.
+     * Intentionally only used by new Polished+ and Wow looks.
+     */
+    private fun safeChromaScale(targetY: Float, r: Float, g: Float,
+                                b: Float, sourceY: Float,
+                                desired: Float): Float {
+        val upper = max(r, max(g, b)) - sourceY
+        val lower = sourceY - min(r, min(g, b))
+        var limit = desired
+        if (upper > 0.001f) limit = min(limit, (255f - targetY) / upper)
+        if (lower > 0.001f) limit = min(limit, targetY / lower)
+        return max(0f, limit)
+    }
 
     private fun sample(field: FloatArray, w: Int, h: Int,
                        x: Float, y: Float): Float {
@@ -161,6 +177,13 @@ object PolishedAIProcessor {
         }
         progress(50)
 
+        // All Polished calculations remain equivalent to the 0.4.3 baseline.
+        // New looks use a second, distinct finishing architecture.
+        val impact = when (style) {
+            Style.POLISHED -> 0f
+            Style.POLISHED_PLUS -> 0.62f
+            Style.WOW -> 1f
+        }
         val output = Bitmap.createBitmap(
             source.width, source.height, Bitmap.Config.ARGB_8888)
         val batch = min(16, source.height)
@@ -255,14 +278,68 @@ object PolishedAIProcessor {
                         (1f - 0.65f * ease((y - 202f) / 52f))
                     val colourScale = (1f + vividness).coerceIn(1f, 1.4f)
 
-                    // Keep colour edges consistent; the same luminance
-                    // adjustment is applied to every colour channel.
-                    val newY = y + tone + texturePop
-                    val cr = newY + (r - y) * colourScale
-                    val cg = newY + (g - y) * colourScale
-                    val cb = newY + (b - y) * colourScale
-                    if (cr < 0f || cg < 0f || cb < 0f ||
-                        cr > 255f || cg > 255f || cb > 255f) clipped++
+                    // Richer midtone light/dark separation, not a uniform
+                    // brightness increase. Black floor and specular/channel
+                    // highlights are anchored to protect night and petals.
+                    val peakOriginal = max(sr, max(sg, sb))
+                    val channelHighlightGuard = 1f -
+                        0.88f * ease((peakOriginal - 202f) / 49f)
+                    val normalizedY = (y - 128f) / 128f
+                    val sCurve = normalizedY *
+                        (1f - normalizedY * normalizedY)
+                    val tonalSeparation = if (impact > 0f)
+                        (sCurve * 42f * impact * shadowGuard *
+                            channelHighlightGuard *
+                            (if (darkScene) 0.53f else 1f))
+                            .coerceIn(-14f, 14f)
+                    else 0f
+
+                    // Stronger *existing* texture separation in defined
+                    // regions, not generative detail or semantic segmentation.
+                    // Skin, flowers, shadows and bokeh remain guarded.
+                    val structuredArea = ease((t - 0.16f) / 0.48f)
+                    val dimension = if (impact > 0f)
+                        (detail * (0.36f + 0.80f * impact) *
+                            detailSafety * structuredArea *
+                            channelHighlightGuard).coerceIn(-11f, 11f)
+                    else 0f
+
+                    // Saturation selectively enriches muted colours while
+                    // suppressing neon foliage and red/magenta petal damage.
+                    val vividGreen = ease((sg - max(sr, sb) - 14f) / 55f) *
+                        ease((saturation - 0.20f) / 0.45f)
+                    val pinkPetal = ease((sr - sg - 12f) / 55f) *
+                        ease((sb - sg - 9f) / 55f) *
+                        ease((saturation - 0.20f) / 0.48f)
+                    val vibrantGuard = (1f - 0.70f * skinLike) *
+                        (1f - 0.68f * max(redFlower, pinkPetal)) *
+                        (1f - 0.58f * vividGreen) *
+                        channelHighlightGuard
+                    val extraColour = if (impact > 0f)
+                        impact * (0.12f + 0.13f * (1f - saturation)) *
+                            vibrantGuard
+                    else 0f
+
+                    // The old Polished branch remains untouched numerically.
+                    // Count candidate out-of-gamut pixels before preserving
+                    // hue/luminance with chroma-only gamut mapping.
+                    val newY = if (impact > 0f)
+                        (y + tone + texturePop + tonalSeparation + dimension)
+                            .coerceIn(0f, 255f)
+                    else y + tone + texturePop
+                    val requestedChroma = colourScale + extraColour
+                    val proposedR = newY + (r - y) * requestedChroma
+                    val proposedG = newY + (g - y) * requestedChroma
+                    val proposedB = newY + (b - y) * requestedChroma
+                    if (proposedR < 0f || proposedG < 0f || proposedB < 0f ||
+                        proposedR > 255f || proposedG > 255f ||
+                        proposedB > 255f) clipped++
+                    val appliedChroma = if (impact > 0f)
+                        safeChromaScale(newY, r, g, b, y, requestedChroma)
+                    else requestedChroma
+                    val cr = newY + (r - y) * appliedChroma
+                    val cg = newY + (g - y) * appliedChroma
+                    val cb = newY + (b - y) * appliedChroma
                     val rr = cr.roundToInt().coerceIn(0, 255)
                     val gg = cg.roundToInt().coerceIn(0, 255)
                     val bb = cb.roundToInt().coerceIn(0, 255)

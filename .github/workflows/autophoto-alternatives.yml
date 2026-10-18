@@ -1,7 +1,7 @@
-name: Build AutoPhoto Polished Only v0.4.3.1
+name: Build AutoPhoto Polished Impact v0.4.4
 on:
   push:
-    branches: [autophoto-polished-only-v0431]
+    branches: [autophoto-polished-impact-v044]
   workflow_dispatch:
 permissions:
   contents: write
@@ -76,7 +76,7 @@ jobs:
           assert "fun enhanceAdaptiveStrong(" in p
           assert "localMinimumY" in p and "skinGuide" in p and "skyGuide" in p
           assert all(t in ui for t in ["ImageProcessor.correct(input)", "MaskedAIProcessor.enhanceScene", "detailProgressActive = false"])
-          assert "applicationId = \"com.example.autophoto.polished.only.v0431\"" in Path("app/build.gradle.kts").read_text()
+          assert "applicationId = \"com.example.autophoto.polished.impact.v044\"" in Path("app/build.gradle.kts").read_text()
           polished=Path("app/src/main/java/com/example/autophoto/PolishedAIProcessor.kt").read_text()
           assert all(t in polished for t in [
               'AlternativeAIProcessor.adaptiveLut(',
@@ -88,6 +88,9 @@ jobs:
               "refreshPolishedButtons()",
               "runPolishedAI()"
           ])
+          assert "safeChromaScale(" in polished and "val tonalSeparation = if (impact > 0f)" in polished
+          assert 'Style.POLISHED -> 0f' in polished
+          assert 'Style.POLISHED_PLUS -> 0.62f' in polished and 'Style.WOW -> 1f' in polished
           assert "for (button in arrayOf(openButton, saveButton))" in ui
           assert "root.addView(polishedButton," in ui
           assert "root.addView(polishedRow," in ui
@@ -101,7 +104,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AutoPhoto-Polished-Only-v0.4.3.1-APK
+          name: AutoPhoto-Polished-Impact-v0.4.4-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
@@ -109,18 +112,19 @@ jobs:
         if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: autophoto-polished-only-v0.4.3.1
-          name: AutoPhoto Polished Only v0.4.3.1 — Simplified Screen
+          tag_name: autophoto-polished-impact-v0.4.4
+          name: AutoPhoto Polished Impact v0.4.4 — Distinct Looks
           make_latest: false
           generate_release_notes: false
           body: |
-            AutoPhoto Polished Only v0.4.3.1 simplifies the interface to
-            Open, Save, Run Polished AI, and Polished / Polished+ / Wow.
-            The image preview has more space. The source processing algorithms
-            and pretrained neural LUT remain identical to v0.4.3.
-            Other modes are hidden from this interface, NOT deleted.
-            Unique app ID preserves all existing installed applications.
-            Fully offline; processing quality still requires phone testing.
+            AutoPhoto Polished Impact v0.4.4 keeps the simplified screen,
+            pretrained learned LUT and original Polished baseline.
+            Polished+ and Wow now have more distinct tonal depth, regional
+            microcontrast and selectively richer colour, while protecting
+            skin, flower highlights, foliage and dark backgrounds.
+            The new gamut-fitting step prevents independent RGB clipping.
+            Original apps remain intact thanks to a separate app ID.
+            Fully offline. Quality still needs real photo comparisons.
           files: app/build/outputs/apk/debug/*.apk
           fail_on_unmatched_files: true
           overwrite_files: true

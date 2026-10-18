@@ -6,11 +6,11 @@ android {
     namespace = "com.example.autophoto"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.example.autophoto.polished.only.v0431"
+        applicationId = "com.example.autophoto.polished.impact.v044"
         minSdk = 29
         targetSdk = 35
         versionCode = 1
-        versionName = "0.4.3.1-polished-only"
+        versionName = "0.4.4-polished-impact"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
