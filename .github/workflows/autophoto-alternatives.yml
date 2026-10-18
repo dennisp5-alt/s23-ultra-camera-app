@@ -1,7 +1,7 @@
-name: Build AutoPhoto Alternative AI Lab v0.3.9.1
+name: Build AutoPhoto Quality Lab v0.4.0
 on:
   push:
-    branches: [autophoto-ai-scene-v0391]
+    branches: [autophoto-quality-lab-v040]
   workflow_dispatch:
 permissions:
   contents: write
@@ -67,7 +67,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AutoPhoto-AI-Lab-v0.3.9.1-APK
+          name: AutoPhoto-Quality-Lab-v0.4.0-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
@@ -75,16 +75,17 @@ jobs:
         if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: autophoto-ai-lab-v0.3.9.1
-          name: AutoPhoto AI Lab v0.3.9.1 — Persistent Scene Diagnostics
+          tag_name: autophoto-quality-lab-v0.4.0
+          name: AutoPhoto Quality Lab v0.4.0 — Edge-aware Local Detail
           make_latest: false
           generate_release_notes: false
           body: |
-            Diagnostic-only release retaining all previously working AI engines.
-            Scene results now show ACTIVE/FALLBACK, sky/water/people coverage,
-            segmentation time and total time in a persistent panel that
-            survives before/after image taps and saving.
-            Distinct Android application ID so v0.3.9 is unaffected.
+            Separate quality-first experiment, based on working v0.3.9.1.
+            Adds Local Detail Lab: original-resolution edge-aware luminance
+            enhancement with colour, highlight, skin and natural-bokeh guards.
+            No changes to original Auto or other pretrained AI modes.
+            Compare bottlebrush, rose, portrait and pond landscape photos.
+            Fully offline. GitHub artifact and direct APK provided.
           files: app/build/outputs/apk/debug/*.apk
           fail_on_unmatched_files: true
           overwrite_files: true

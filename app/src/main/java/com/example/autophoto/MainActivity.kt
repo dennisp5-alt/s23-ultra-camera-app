@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var maskedButton: Button
     private lateinit var semanticButton: Button
     private lateinit var sceneButton: Button
+    private lateinit var detailButton: Button
     private lateinit var saveButton: Button
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -227,6 +228,20 @@ class MainActivity : ComponentActivity() {
             marginStart = pad / 4
             marginEnd = pad / 4
         })
+        detailButton = Button(this).apply {
+            text = "Local Detail Lab (v0.4.0)"
+            isAllCaps = false
+            textSize = 13f
+            minHeight = (48 * resources.displayMetrics.density).roundToInt()
+            setOnClickListener { runLocalDetailLab() }
+        }
+        root.addView(detailButton, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            marginStart = pad / 4
+            marginEnd = pad / 4
+        })
         info = TextView(this).apply {
             text = "Choose a photo to start"
             gravity = Gravity.CENTER
@@ -286,6 +301,7 @@ class MainActivity : ComponentActivity() {
         maskedButton.isEnabled = !busy && original != null
         semanticButton.isEnabled = !busy && original != null
         sceneButton.isEnabled = !busy && original != null
+        detailButton.isEnabled = !busy && original != null
         saveButton.isEnabled = !busy && corrected != null
     }
 
@@ -473,6 +489,49 @@ class MainActivity : ComponentActivity() {
                     (e.localizedMessage ?: e.javaClass.simpleName)
                 sceneDiagnostics.visibility = View.VISIBLE
                 errorMessage("Scene AI failed", e)
+            } finally {
+                setBusy(false)
+            }
+        }
+    }
+
+    /**
+     * Experimental local luminance contrast/detail path. Runs independent of
+     * original Auto, MobileIE, LUT, Masked AI, ML Kit and scene segmentation.
+     */
+    private fun runLocalDetailLab() {
+        val source = original ?: return
+        scope.launch {
+            setBusy(true)
+            sceneDiagnostics.visibility = View.VISIBLE
+            sceneDiagnostics.text = "Quality Lab • analysing existing image texture…"
+            info.text = "Quality Lab • preparing edge-aware enhancement…"
+            try {
+                val result = withContext(Dispatchers.Default) {
+                    LocalDetailProcessor.enhance(source) { percent ->
+                        runOnUiThread {
+                            info.text = "Local Detail Lab • processing " + percent + "%"
+                        }
+                    }
+                }
+                corrected = result.bitmap
+                showOriginal = false
+                image.setImageBitmap(result.bitmap)
+                val sec = result.elapsedMs / 1000.0
+                sceneDiagnostics.text = "Local Detail Lab v0.4.0" + "\n" +
+                    "Duration: " + "%.1f".format(sec) + "s" +
+                    " • Pixels changed: " + "%.1f".format(result.changedPercent) + "%" +
+                    "\n" + "Average luminance change: " +
+                    "%.2f".format(result.meanAbsLumaChange) +
+                    "/255 • Texture mask: " +
+                    "%.1f".format(result.maskPercent) + "%"
+                sceneDiagnostics.visibility = View.VISIBLE
+                info.text = "Local Detail Lab complete — tap photo to compare"
+            } catch (e: Exception) {
+                sceneDiagnostics.text = "Local Detail Lab failed: " +
+                    (e.localizedMessage ?: e.javaClass.simpleName)
+                sceneDiagnostics.visibility = View.VISIBLE
+                errorMessage("Local Detail Lab failed", e)
             } finally {
                 setBusy(false)
             }
