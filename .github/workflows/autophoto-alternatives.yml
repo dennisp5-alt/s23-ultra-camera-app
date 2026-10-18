@@ -1,10 +1,10 @@
-name: Build AutoPhoto Alternative AI Lab v0.3.9
+name: Build AutoPhoto Alternative AI Lab v0.3.9.1
 on:
   push:
-    branches: [autophoto-ai-scene-v039]
+    branches: [autophoto-ai-scene-v0391]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -67,6 +67,24 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AutoPhoto-AI-Lab-v0.3.9-APK
+          name: AutoPhoto-AI-Lab-v0.3.9.1-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Publish directly downloadable APK
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: autophoto-ai-lab-v0.3.9.1
+          name: AutoPhoto AI Lab v0.3.9.1 — Persistent Scene Diagnostics
+          make_latest: false
+          generate_release_notes: false
+          body: |
+            Diagnostic-only release retaining all previously working AI engines.
+            Scene results now show ACTIVE/FALLBACK, sky/water/people coverage,
+            segmentation time and total time in a persistent panel that
+            survives before/after image taps and saving.
+            Distinct Android application ID so v0.3.9 is unaffected.
+          files: app/build/outputs/apk/debug/*.apk
+          fail_on_unmatched_files: true
+          overwrite_files: true

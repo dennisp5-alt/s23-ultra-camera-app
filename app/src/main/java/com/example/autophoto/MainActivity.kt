@@ -46,6 +46,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var image: ImageView
     private lateinit var progress: ProgressBar
     private lateinit var info: TextView
+    // Dedicated persistent result panel, never overwritten by compare/save status.
+    private lateinit var sceneDiagnostics: TextView
     private lateinit var openButton: Button
     private lateinit var autoButton: Button
     private lateinit var aiButton: Button
@@ -59,6 +61,8 @@ class MainActivity : ComponentActivity() {
         if (uri == null) return@registerForActivityResult
         scope.launch {
             setBusy(true)
+            sceneDiagnostics.visibility = View.GONE
+            sceneDiagnostics.text = ""
             info.text = "Loading photo…"
             try {
                 val bitmap = withContext(Dispatchers.IO) { decodePhoto(uri) }
@@ -232,6 +236,19 @@ class MainActivity : ComponentActivity() {
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         ))
+        // A dedicated result panel survives preview taps and saves.
+        sceneDiagnostics = TextView(this).apply {
+            visibility = View.GONE
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setPadding(pad / 2, pad / 3, pad / 2, pad / 2)
+            setTextIsSelectable(true)
+            contentDescription = "Scene AI segmentation results and diagnostic status"
+        }
+        root.addView(sceneDiagnostics, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
         progress = ProgressBar(this).apply { visibility = View.GONE }
         root.addView(progress, LinearLayout.LayoutParams(
             pad * 2, pad * 2
@@ -292,6 +309,7 @@ class MainActivity : ComponentActivity() {
         val input = original ?: return
         scope.launch {
             setBusy(true)
+            sceneDiagnostics.visibility = View.GONE
             try {
                 val output = withContext(Dispatchers.Default) { ImageProcessor.correct(input) }
                 corrected = output
@@ -316,6 +334,7 @@ class MainActivity : ComponentActivity() {
         val mode = if (mobile) "MobileIE" else "Learned 3D LUT"
         scope.launch {
             setBusy(true)
+            sceneDiagnostics.visibility = View.GONE
             info.text = mode + " • loading offline neural weights…"
             try {
                 val result = withContext(Dispatchers.Default) {
@@ -346,6 +365,7 @@ class MainActivity : ComponentActivity() {
         val source = original ?: return
         scope.launch {
             setBusy(true)
+            sceneDiagnostics.visibility = View.GONE
             info.text = "Adaptive Masked AI • analysing regions…"
             try {
                 val output = withContext(Dispatchers.Default) {
@@ -377,6 +397,7 @@ class MainActivity : ComponentActivity() {
         val source = original ?: return
         scope.launch {
             setBusy(true)
+            sceneDiagnostics.visibility = View.GONE
             info.text = "Semantic AI • offline person segmentation…"
             try {
                 val output = withContext(Dispatchers.Default) {
@@ -411,6 +432,8 @@ class MainActivity : ComponentActivity() {
         val source = original ?: return
         scope.launch {
             setBusy(true)
+            sceneDiagnostics.visibility = View.VISIBLE
+            sceneDiagnostics.text = "Scene model: starting offline inference…"
             info.text = "Scene AI • analysing sky, water and people offline…"
             try {
                 val result = withContext(Dispatchers.Default) {
@@ -426,15 +449,29 @@ class MainActivity : ComponentActivity() {
                 image.setImageBitmap(result.bitmap)
                 val total = result.totalMillis / 1000.0
                 val seg = result.sceneSegmentationMs / 1000.0
-                val regions = if (result.sceneStatus.contains("active")) {
-                    "Sky " + "%.0f".format(result.skyCoverage * 100f) +
-                    "% • Water " + "%.0f".format(result.waterCoverage * 100f) +
-                    "% • People " + "%.0f".format(result.personMaskCoverage * 100f) + "%"
-                } else result.sceneStatus
-                info.text = "Scene AI • " + "%.1f".format(total) +
-                    "s total • semantic " + "%.1f".format(seg) +
-                    "s • " + regions + " • tap photo to compare"
+                // Keep true model status visible after photo comparison & Save.
+                val sceneSucceeded = result.sceneStatus ==
+                    "Trained sky/water/person masks active"
+                val report = if (sceneSucceeded) {
+                    "Scene segmentation: ACTIVE" + "\n" +
+                    "Sky " + "%.1f".format(result.skyCoverage * 100f) + "%  •  " +
+                    "Water " + "%.1f".format(result.waterCoverage * 100f) + "%  •  " +
+                    "People " + "%.1f".format(result.personMaskCoverage * 100f) + "%" +
+                    "\n" + "Scene inference " + "%.1f".format(seg) + "s" +
+                    "  •  Total " + "%.1f".format(total) + "s"
+                } else {
+                    "Scene segmentation: FALLBACK" + "\n" +
+                    result.sceneStatus + "\n" +
+                    "Scene inference " + "%.1f".format(seg) + "s" +
+                    "  •  Total " + "%.1f".format(total) + "s"
+                }
+                sceneDiagnostics.text = report
+                sceneDiagnostics.visibility = View.VISIBLE
+                info.text = "Scene AI complete — tap photo to compare"
             } catch (e: Exception) {
+                sceneDiagnostics.text = "Scene processing error: " +
+                    (e.localizedMessage ?: e.javaClass.simpleName)
+                sceneDiagnostics.visibility = View.VISIBLE
                 errorMessage("Scene AI failed", e)
             } finally {
                 setBusy(false)
