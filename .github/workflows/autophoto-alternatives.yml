@@ -107,10 +107,16 @@ jobs:
           assert "ExifInterface.TAG_ORIENTATION" in ui
           assert "ExifInterface.TAG_GPS" not in ui
           assert "applicationId = \"com.example.autophoto.quality.v047\"" in Path("app/build.gradle.kts").read_text()
-          import subprocess
-          reference = subprocess.check_output([
-              "git", "show", "a00bce9ad2c44606cb7f9bbf00a83ae4de3ad47c:app/src/main/java/com/example/autophoto/PolishedAIProcessor.kt"])
-          assert polished.encode() == reference, "Locked approved Polished processor changed!"
+          import hashlib
+          # Git blob SHA of the approved v0.4.6 processor. This checks the
+          # actual file bytes without depending on Git checkout ancestry.
+          payload = polished.encode("utf-8")
+          blob = hashlib.sha1(
+              b"blob " + str(len(payload)).encode("ascii") + bytes([0]) + payload
+          ).hexdigest()
+          assert blob == "ea92bd74ef01997e228a5c8de7ddd08e2aa7644a", (
+              "Approved Polished processor has changed: " + blob
+          )
           assert "for (button in arrayOf(openButton, saveButton))" in ui
           assert "root.addView(polishedButton," in ui
           assert "root.addView(polishedRow," in ui
