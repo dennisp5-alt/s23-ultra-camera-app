@@ -1,7 +1,7 @@
-name: Build AutoPhoto Selective Wow v0.4.5
+name: Build AutoPhoto Polished Preferred v0.4.6
 on:
   push:
-    branches: [autophoto-polished-selective-v045]
+    branches: [autophoto-polished-preferred-v046]
   workflow_dispatch:
 permissions:
   contents: write
@@ -76,7 +76,7 @@ jobs:
           assert "fun enhanceAdaptiveStrong(" in p
           assert "localMinimumY" in p and "skinGuide" in p and "skyGuide" in p
           assert all(t in ui for t in ["ImageProcessor.correct(input)", "MaskedAIProcessor.enhanceScene", "detailProgressActive = false"])
-          assert "applicationId = \"com.example.autophoto.polished.selective.v045\"" in Path("app/build.gradle.kts").read_text()
+          assert "applicationId = \"com.example.autophoto.polished.preferred.v046\"" in Path("app/build.gradle.kts").read_text()
           polished=Path("app/src/main/java/com/example/autophoto/PolishedAIProcessor.kt").read_text()
           assert all(t in polished for t in [
               'AlternativeAIProcessor.adaptiveLut(',
@@ -94,6 +94,9 @@ jobs:
           assert 'WOW("Wow", 0.75f, 0.10f, 5.0f, 0.12f, 0.24f)' in polished
           assert "if (style == Style.POLISHED)" in polished
           assert "depthOpportunity" in polished and "protectedPetals" in polished
+          assert "private var polishedStyle = PolishedAIProcessor.Style.POLISHED" in ui
+          assert "if (visible) {" in ui and '"Wow", PolishedAIProcessor.Style.WOW, visible = false)' in ui
+          assert 'info.text = "${bitmap.width} × ${bitmap.height} • ${polishedStyle.label} selected"' in ui
           assert "for (button in arrayOf(openButton, saveButton))" in ui
           assert "root.addView(polishedButton," in ui
           assert "root.addView(polishedRow," in ui
@@ -107,7 +110,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AutoPhoto-Selective-Wow-v0.4.5-APK
+          name: AutoPhoto-Polished-Preferred-v0.4.6-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
@@ -115,19 +118,19 @@ jobs:
         if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: autophoto-polished-selective-v0.4.5
-          name: AutoPhoto Selective Wow v0.4.5 — Option B
+          tag_name: autophoto-polished-preferred-v0.4.6
+          name: AutoPhoto Polished Preferred v0.4.6 — Stable Favourite
           make_latest: false
           generate_release_notes: false
           body: |
-            Option B: redesign Wow to use texture-guided focal separation,
-            gentle smooth-background depth, restrained local relief and
-            strong skin/red-petal/magenta/highlight protection. Polished
-            is unchanged from the photographic baseline; Polished+ is
-            deliberately milder than v0.4.4. Trained offline LUT intact.
-            The simple original interface and previous engines remain.
-            New separate app ID does not overwrite any existing version.
-            The app is built; actual quality still requires phone tests.
+            Polished is now the default selected finish after flower, portrait
+            and landscape comparison trials. The proven Polished processor
+            and neural LUT are preserved byte-for-byte from v0.4.5.
+            Polished+ stays selectable as an optional mild variation.
+            Experimental Wow is hidden from the UI, not removed from code.
+            The simplified UI remains Open, Save, Run Polished AI,
+            and two finish choices. New Android app ID preserves older APKs.
+            Fully offline. Confirm installation and compare JPEG exports.
           files: app/build/outputs/apk/debug/*.apk
           fail_on_unmatched_files: true
           overwrite_files: true

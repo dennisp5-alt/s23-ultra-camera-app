@@ -63,7 +63,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var polishNormalButton: Button
     private lateinit var polishPlusButton: Button
     private lateinit var polishWowButton: Button
-    private var polishedStyle = PolishedAIProcessor.Style.POLISHED_PLUS
+    // The user-preferred photographic finish is the default in this release.
+    private var polishedStyle = PolishedAIProcessor.Style.POLISHED
     private var polishedProgressActive = false
     private lateinit var detailAdaptiveButton: Button
     // User-preferred Strong is the new default; original Gentle/Balanced/
@@ -86,7 +87,7 @@ class MainActivity : ComponentActivity() {
                 corrected = null
                 showOriginal = false
                 image.setImageBitmap(bitmap)
-                info.text = "${bitmap.width} × ${bitmap.height} • Select Polished, Polished+ or Wow"
+                info.text = "${bitmap.width} × ${bitmap.height} • ${polishedStyle.label} selected"
             } catch (e: Exception) {
                 errorMessage("Cannot open image", e)
             } finally {
@@ -276,8 +277,9 @@ class MainActivity : ComponentActivity() {
         }
         // v0.4.2 Adaptive Strong remains compiled but hidden.
 
-        // Three A/B finishing looks; each starts from the untouched original
-        // and runs the same genuine neural learned LUT before style finishing.
+        // Preferred-release interface: the selected default is Polished.
+        // Polished+ remains an optional variation. Experimental Wow stays
+        // compiled and preserved in the processor but hidden from this UI.
         polishedButton = Button(this).apply {
             text = "Run Polished AI"
             isAllCaps = false
@@ -296,7 +298,10 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        fun addPolishedChoice(label: String, preset: PolishedAIProcessor.Style): Button {
+        fun addPolishedChoice(
+            label: String, preset: PolishedAIProcessor.Style,
+            visible: Boolean = true
+        ): Button {
             val button = Button(this).apply {
                 text = label
                 isAllCaps = false
@@ -307,23 +312,26 @@ class MainActivity : ComponentActivity() {
                     refreshPolishedButtons()
                 }
             }
-            polishedRow.addView(button, LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            if (visible) {
+                polishedRow.addView(button, LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            }
             return button
         }
         polishNormalButton = addPolishedChoice(
             "Polished", PolishedAIProcessor.Style.POLISHED)
         polishPlusButton = addPolishedChoice(
             "Polished+", PolishedAIProcessor.Style.POLISHED_PLUS)
+        // Hidden, not removed: restores easily if a later experiment wins.
         polishWowButton = addPolishedChoice(
-            "Wow", PolishedAIProcessor.Style.WOW)
+            "Wow", PolishedAIProcessor.Style.WOW, visible = false)
         root.addView(polishedRow, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         ))
         refreshPolishedButtons()
         info = TextView(this).apply {
-            text = "Open a photo, choose a look, then run Polished AI"
+            text = "Open a photo • Polished is selected by default"
             gravity = Gravity.CENTER
             setPadding(0, pad / 2, 0, pad / 2)
         }
