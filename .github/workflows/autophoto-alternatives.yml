@@ -1,7 +1,7 @@
-name: Build AutoPhoto Polished Preferred v0.4.6
+name: Build AutoPhoto Quality v0.4.7
 on:
   push:
-    branches: [autophoto-polished-preferred-v046]
+    branches: [autophoto-quality-preserving-v047]
   workflow_dispatch:
 permissions:
   contents: write
@@ -76,7 +76,7 @@ jobs:
           assert "fun enhanceAdaptiveStrong(" in p
           assert "localMinimumY" in p and "skinGuide" in p and "skyGuide" in p
           assert all(t in ui for t in ["ImageProcessor.correct(input)", "MaskedAIProcessor.enhanceScene", "detailProgressActive = false"])
-          assert "applicationId = \"com.example.autophoto.polished.preferred.v046\"" in Path("app/build.gradle.kts").read_text()
+          assert "applicationId = \"com.example.autophoto.quality.v047\"" in Path("app/build.gradle.kts").read_text()
           polished=Path("app/src/main/java/com/example/autophoto/PolishedAIProcessor.kt").read_text()
           assert all(t in polished for t in [
               'AlternativeAIProcessor.adaptiveLut(',
@@ -97,6 +97,16 @@ jobs:
           assert "private var polishedStyle = PolishedAIProcessor.Style.POLISHED" in ui
           assert "if (visible) {" in ui and '"Wow", PolishedAIProcessor.Style.WOW, visible = false)' in ui
           assert 'info.text = "${bitmap.width} × ${bitmap.height} • ${polishedStyle.label} selected"' in ui
+          assert "highResolutionCheckBox = CheckBox(this)" in ui
+          assert "maxMemory()" in ui and "20_000_000.0" in ui
+          assert "safeExifTags = arrayOf(" in ui
+          assert "ExifInterface.TAG_ORIENTATION" in ui
+          assert "ExifInterface.TAG_GPS" not in ui
+          assert "applicationId = \"com.example.autophoto.quality.v047\"" in Path("app/build.gradle.kts").read_text()
+          import subprocess
+          reference = subprocess.check_output([
+              "git", "show", "a00bce9ad2c44606cb7f9bbf00a83ae4de3ad47c:app/src/main/java/com/example/autophoto/PolishedAIProcessor.kt"])
+          assert polished.encode() == reference, "Locked approved Polished processor changed!"
           assert "for (button in arrayOf(openButton, saveButton))" in ui
           assert "root.addView(polishedButton," in ui
           assert "root.addView(polishedRow," in ui
@@ -110,7 +120,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AutoPhoto-Polished-Preferred-v0.4.6-APK
+          name: AutoPhoto-Quality-v0.4.7-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
@@ -118,19 +128,19 @@ jobs:
         if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: autophoto-polished-preferred-v0.4.6
-          name: AutoPhoto Polished Preferred v0.4.6 — Stable Favourite
+          tag_name: autophoto-quality-preserving-v0.4.7
+          name: AutoPhoto Quality v0.4.7 — EXIF + Hi-Res Experiment
           make_latest: false
           generate_release_notes: false
           body: |
-            Polished is now the default selected finish after flower, portrait
-            and landscape comparison trials. The proven Polished processor
-            and neural LUT are preserved byte-for-byte from v0.4.5.
-            Polished+ stays selectable as an optional mild variation.
-            Experimental Wow is hidden from the UI, not removed from code.
-            The simplified UI remains Open, Save, Run Polished AI,
-            and two finish choices. New Android app ID preserves older APKs.
-            Fully offline. Confirm installation and compare JPEG exports.
+            Isolated v0.4.7 quality experiment: original Polished colour,
+            tone and detail algorithm fully unchanged. Preserves a safe
+            whitelist of useful camera EXIF tags when available, omitting GPS,
+            serial numbers and private identifying data. Keeps standard 4096px
+            decoding by default; opt-in high-resolution mode increases output
+            to at most 16-20MP on memory-capable devices. JPEG 98 and sRGB
+            rendering unchanged. All earlier versions remain installable.
+            High-resolution processing needs S23 Ultra on-device validation.
           files: app/build/outputs/apk/debug/*.apk
           fail_on_unmatched_files: true
           overwrite_files: true

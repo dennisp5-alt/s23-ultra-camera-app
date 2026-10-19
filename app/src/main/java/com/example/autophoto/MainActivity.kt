@@ -1,5 +1,6 @@
 package com.example.autophoto
 
+import android.app.ActivityManager
 import android.content.ContentValues
 import android.graphics.Bitmap
 import android.graphics.ColorSpace
@@ -15,12 +16,14 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.exifinterface.media.ExifInterface
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
 import kotlinx.coroutines.CoroutineScope
@@ -41,6 +44,11 @@ class MainActivity : ComponentActivity() {
     private var original: Bitmap? = null
     private var corrected: Bitmap? = null
     private var showOriginal = false
+    // The photo-picker Uri is retained only while this activity is open so
+    // useful, GPS-free camera EXIF can be copied into an exported JPEG.
+    private var selectedSourceUri: Uri? = null
+    private var highResolutionEnabled = false
+    private lateinit var highResolutionCheckBox: CheckBox
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private lateinit var image: ImageView
@@ -74,17 +82,33 @@ class MainActivity : ComponentActivity() {
     private lateinit var saveButton: Button
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri == null) return@registerForActivityResult
+        if (uri != null) loadPhoto(uri)
+    }
+
+    private fun loadPhoto(uri: Uri) {
         scope.launch {
             setBusy(true)
             sceneDiagnostics.visibility = View.GONE
             sceneDiagnostics.text = ""
             info.text = "Loading photo…"
             try {
-                val bitmap = withContext(Dispatchers.IO) { decodePhoto(uri) }
+                // Larger photos are re-decoded only when the user explicitly
+                // opts in. If the decode runs out of memory, retry safely at
+                // the unchanged 4096px reference limit.
+                val bitmap = try {
+                    withContext(Dispatchers.IO) {
+                        decodePhoto(uri, highResolutionEnabled)
+                    }
+                } catch (oom: OutOfMemoryError) {
+                    if (!highResolutionEnabled) throw oom
+                    highResolutionEnabled = false
+                    highResolutionCheckBox.isChecked = false
+                    withContext(Dispatchers.IO) { decodePhoto(uri, false) }
+                }
                 image.setImageBitmap(null)
                 original = bitmap
                 corrected = null
+                selectedSourceUri = uri
                 showOriginal = false
                 image.setImageBitmap(bitmap)
                 info.text = "${bitmap.width} × ${bitmap.height} • ${polishedStyle.label} selected"
@@ -176,6 +200,25 @@ class MainActivity : ComponentActivity() {
             })
         }
         root.addView(controls, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
+
+        // Opt-in only. Standard remains exactly the original 4096px decode.
+        // The extra compact checkbox does not alter Polished's processing.
+        highResolutionCheckBox = CheckBox(this).apply {
+            text = "High-res import (up to 20 MP • slower)"
+            textSize = 11f
+            isAllCaps = false
+            isChecked = false
+            setOnCheckedChangeListener { _, checked ->
+                if (highResolutionEnabled != checked) {
+                    highResolutionEnabled = checked
+                    selectedSourceUri?.let { loadPhoto(it) }
+                }
+            }
+        }
+        root.addView(highResolutionCheckBox, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         ))
@@ -411,6 +454,7 @@ class MainActivity : ComponentActivity() {
     private fun setBusy(busy: Boolean) {
         progress.visibility = if (busy) View.VISIBLE else View.GONE
         openButton.isEnabled = !busy
+        highResolutionCheckBox.isEnabled = !busy
         autoButton.isEnabled = !busy && original != null
         aiButton.isEnabled = !busy && original != null
         lutButton.isEnabled = !busy && original != null
@@ -429,18 +473,40 @@ class MainActivity : ComponentActivity() {
         saveButton.isEnabled = !busy && corrected != null
     }
 
-    /** Decode on a worker thread, with a bounded 4096px maximum edge to avoid OOM. */
-    private fun decodePhoto(uri: Uri): Bitmap {
+    /**
+     * Standard uses the proven <=4096px path. An explicit opt-in may decode
+     * larger photos up to 20MP/5120px on a sufficiently large Android heap,
+     * or <=16MP/4608px on 384-511 MiB heaps. Small heaps keep 4096px.
+     * The input is NEVER decoded at 50/200MP natively: full-frame LUT
+     * processing allocates several full-size bitmaps and must avoid OOM.
+     */
+    private fun decodePhoto(uri: Uri, highRes: Boolean): Bitmap {
         val source = ImageDecoder.createSource(contentResolver, uri)
         return ImageDecoder.decodeBitmap(source) { decoder, imageInfo, _ ->
             val width = imageInfo.size.width
             val height = imageInfo.size.height
-            val scale = min(1.0, 4096.0 / max(width, height))
-            if (scale < 1) decoder.setTargetSize(
+            val heapMiB = Runtime.getRuntime().maxMemory() / (1024 * 1024)
+            val edgeCap = if (!highRes) 4096.0 else when {
+                heapMiB >= 512 -> 5120.0
+                heapMiB >= 384 -> 4608.0
+                else -> 4096.0
+            }
+            val pixelCap = if (!highRes) 4096.0 * 4096.0 else when {
+                heapMiB >= 512 -> 20_000_000.0
+                heapMiB >= 384 -> 16_000_000.0
+                else -> 4096.0 * 4096.0
+            }
+            val pixels = width.toDouble() * height.toDouble()
+            val scale = min(1.0, min(
+                edgeCap / max(width, height),
+                sqrt(pixelCap / pixels)
+            ))
+            if (scale < 1.0) decoder.setTargetSize(
                 max(1, (width * scale).roundToInt()),
                 max(1, (height * scale).roundToInt())
             )
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            // Preserve existing, user-approved sRGB colour rendering.
             decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB))
         }
     }
@@ -762,9 +828,15 @@ class MainActivity : ComponentActivity() {
         scope.launch {
             setBusy(true)
             try {
-                val saved = withContext(Dispatchers.IO) { writeJpeg(output) }
-                info.text = "Saved to Pictures/AutoPhoto"
-                Toast.makeText(this@MainActivity, "Saved: $saved", Toast.LENGTH_SHORT).show()
+                val save = withContext(Dispatchers.IO) {
+                    writeJpeg(output, selectedSourceUri)
+                }
+                info.text = "Saved to Pictures/AutoPhoto" +
+                    (if (save.cameraDetailsCopied)
+                        " • camera details kept (GPS removed)"
+                    else " • camera details unavailable")
+                Toast.makeText(this@MainActivity, "Saved: ${save.uri}",
+                    Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 errorMessage("Save failed", e)
             } finally {
@@ -773,8 +845,51 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** A half-written photo is deleted if the save fails. Android 10+ scoped storage. */
-    private fun writeJpeg(bitmap: Bitmap): Uri {
+    private data class SavedPhoto(val uri: Uri, val cameraDetailsCopied: Boolean)
+
+    // Whitelist only useful non-location camera tags. Never copy GPS,
+    // maker notes, camera serials, thumbnails, user comments, or proprietary
+    // identifiers. The output's orientation is 1 because ImageDecoder
+    // provides an already oriented bitmap.
+    private val safeExifTags = arrayOf(
+        ExifInterface.TAG_MAKE,
+        ExifInterface.TAG_MODEL,
+        ExifInterface.TAG_LENS_MODEL,
+        ExifInterface.TAG_DATETIME,
+        ExifInterface.TAG_DATETIME_ORIGINAL,
+        ExifInterface.TAG_DATETIME_DIGITIZED,
+        ExifInterface.TAG_SUBSEC_TIME_ORIGINAL,
+        ExifInterface.TAG_OFFSET_TIME_ORIGINAL,
+        ExifInterface.TAG_F_NUMBER,
+        ExifInterface.TAG_EXPOSURE_TIME,
+        ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY,
+        ExifInterface.TAG_FOCAL_LENGTH,
+        ExifInterface.TAG_FLASH,
+        ExifInterface.TAG_WHITE_BALANCE,
+        ExifInterface.TAG_EXPOSURE_BIAS_VALUE,
+        ExifInterface.TAG_EXPOSURE_PROGRAM,
+        ExifInterface.TAG_METERING_MODE
+    )
+
+    private fun safeCameraTags(source: Uri?): Map<String, String> {
+        if (source == null) return emptyMap()
+        return try {
+            contentResolver.openInputStream(source)?.use { stream ->
+                val exif = ExifInterface(stream)
+                safeExifTags.mapNotNull { tag ->
+                    exif.getAttribute(tag)?.let { tag to it }
+                }.toMap()
+            } ?: emptyMap()
+        } catch (_: Exception) {
+            // No EXIF, HEIC/provider restrictions, or stripped photo-picker
+            // metadata must never prevent an otherwise valid JPEG export.
+            emptyMap()
+        }
+    }
+
+    /** A half-written photo is deleted if saving fails. */
+    private fun writeJpeg(bitmap: Bitmap, source: Uri?): SavedPhoto {
+        val cameraTags = safeCameraTags(source)
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, "autophoto_${System.currentTimeMillis()}.jpg")
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
@@ -787,10 +902,27 @@ class MainActivity : ComponentActivity() {
             contentResolver.openOutputStream(uri)?.use {
                 check(bitmap.compress(Bitmap.CompressFormat.JPEG, 98, it)) { "JPEG encoding failed" }
             } ?: error("Could not open destination")
+            var copied = false
+            if (cameraTags.isNotEmpty()) {
+                // Write only after compress() closes its stream. ExifInterface
+                // edits JPEG metadata without recompressing image pixels.
+                contentResolver.openFileDescriptor(uri, "rw")?.use { descriptor ->
+                    val target = ExifInterface(descriptor.fileDescriptor)
+                    for ((tag, value) in cameraTags) target.setAttribute(tag, value)
+                    target.setAttribute(ExifInterface.TAG_ORIENTATION,
+                        ExifInterface.ORIENTATION_NORMAL.toString())
+                    target.setAttribute(ExifInterface.TAG_PIXEL_X_DIMENSION,
+                        bitmap.width.toString())
+                    target.setAttribute(ExifInterface.TAG_PIXEL_Y_DIMENSION,
+                        bitmap.height.toString())
+                    target.saveAttributes()
+                    copied = true
+                } ?: error("JPEG metadata write descriptor unavailable")
+            }
             contentResolver.update(uri, ContentValues().apply {
                 put(MediaStore.Images.Media.IS_PENDING, 0)
             }, null, null)
-            return uri
+            return SavedPhoto(uri, copied)
         } catch (e: Exception) {
             contentResolver.delete(uri, null, null)
             throw e

@@ -6,11 +6,11 @@ android {
     namespace = "com.example.autophoto"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.example.autophoto.polished.preferred.v046"
+        applicationId = "com.example.autophoto.quality.v047"
         minSdk = 29
         targetSdk = 35
         versionCode = 1
-        versionName = "0.4.6-polished-preferred"
+        versionName = "0.4.7-quality-experiment"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -21,6 +21,7 @@ android {
 }
 dependencies {
     implementation("androidx.activity:activity-ktx:1.9.3")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
     implementation("com.google.mlkit:segmentation-selfie:16.0.0-beta6")
