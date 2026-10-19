@@ -1,7 +1,7 @@
-name: Build AutoPhoto Quality v0.4.7
+name: Build AutoPhoto Auto Profile v0.4.8
 on:
   push:
-    branches: [autophoto-quality-preserving-v047]
+    branches: [autophoto-auto-profile-v048]
   workflow_dispatch:
 permissions:
   contents: write
@@ -80,7 +80,7 @@ jobs:
           assert "fun enhanceAdaptiveStrong(" in p
           assert "localMinimumY" in p and "skinGuide" in p and "skyGuide" in p
           assert all(t in ui for t in ["ImageProcessor.correct(input)", "MaskedAIProcessor.enhanceScene", "detailProgressActive = false"])
-          assert "applicationId = \"com.example.autophoto.quality.v047\"" in Path("app/build.gradle.kts").read_text()
+          assert "applicationId = \"com.example.autophoto.profile.v048\"" in Path("app/build.gradle.kts").read_text()
           polished=Path("app/src/main/java/com/example/autophoto/PolishedAIProcessor.kt").read_text()
           assert all(t in polished for t in [
               'AlternativeAIProcessor.adaptiveLut(',
@@ -103,10 +103,24 @@ jobs:
           assert 'info.text = "${bitmap.width} × ${bitmap.height} • ${polishedStyle.label} selected"' in ui
           assert "highResolutionCheckBox = CheckBox(this)" in ui
           assert "maxMemory()" in ui and "20_000_000.0" in ui
+          bridge = Path("app/src/main/java/com/example/autophoto/ColourProfileBridge.kt").read_text()
           assert "safeExifTags = arrayOf(" in ui
+          assert "sourceProfile = ColourProfileBridge.detect(imageInfo.colorSpace)" in ui
+          assert "ColourProfileBridge.encodeP3(" in ui
+          assert "ColourProfileBridge.isVerifiedP3(contentResolver, uri)" in ui
+          assert "highResolutionCheckBox.visibility = View.GONE" in ui
+          assert "ColorSpace.connect(srgb,p3)" in bridge
+          assert "nativeBytes.get(off)" in bridge
+          assert "delta[c]-=dy" in bridge
+          assert "copyPixelsFromBuffer(result)" in bridge
+          assert "ICC_PROFILE" in bridge
+          assert "BitmapFactory.decodeByteArray" in bridge
+          assert "BitmapFactory.decodeFileDescriptor" in bridge
+          assert "decoder.setTargetColorSpace(p3)" in bridge
+          assert "Other RGB → sRGB" in bridge
           assert "ExifInterface.TAG_ORIENTATION" in ui
           assert "ExifInterface.TAG_GPS" not in ui
-          assert "applicationId = \"com.example.autophoto.quality.v047\"" in Path("app/build.gradle.kts").read_text()
+          assert "applicationId = \"com.example.autophoto.profile.v048\"" in Path("app/build.gradle.kts").read_text()
           import hashlib
           # Git blob SHA of the approved v0.4.6 processor. This checks the
           # actual file bytes without depending on Git checkout ancestry.
@@ -130,7 +144,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AutoPhoto-Quality-v0.4.7-APK
+          name: AutoPhoto-Profile-v0.4.8-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
@@ -138,19 +152,21 @@ jobs:
         if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: autophoto-quality-preserving-v0.4.7
-          name: AutoPhoto Quality v0.4.7 — EXIF + Hi-Res Experiment
+          tag_name: autophoto-auto-profile-v0.4.8
+          name: AutoPhoto Auto Profile v0.4.8 — P3 and sRGB
           make_latest: false
           generate_release_notes: false
           body: |
-            Isolated v0.4.7 quality experiment: original Polished colour,
-            tone and detail algorithm fully unchanged. Preserves a safe
-            whitelist of useful camera EXIF tags when available, omitting GPS,
-            serial numbers and private identifying data. Keeps standard 4096px
-            decoding by default; opt-in high-resolution mode increases output
-            to at most 16-20MP on memory-capable devices. JPEG 98 and sRGB
-            rendering unchanged. All earlier versions remain installable.
-            High-resolution processing needs S23 Ultra on-device validation.
+            v0.4.8 experimental automatic ICC detection and P3/sRGB export.
+            Native sRGB originals retain the approved Polished sRGB workflow.
+            P3 originals receive a correctly converted P3 JPEG with original
+            out-of-sRGB chroma restored after the unchanged Polished engine.
+            JPEG APP2 ICC + decoded P3 space are checked before and after
+            GPS-free EXIF copying. Any unsupported P3 path falls back to
+            unchanged sRGB, never mislabels the pixels. Other RGB profiles
+            use validated sRGB conversion. The unused hi-res control is hidden.
+            Unique app ID keeps v0.4.6 and v0.4.7 untouched. Phone testing
+            is required before wide-gamut quality claims are accepted.
           files: app/build/outputs/apk/debug/*.apk
           fail_on_unmatched_files: true
           overwrite_files: true

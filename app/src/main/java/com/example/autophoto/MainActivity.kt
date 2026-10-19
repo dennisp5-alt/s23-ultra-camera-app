@@ -47,6 +47,7 @@ class MainActivity : ComponentActivity() {
     // The photo-picker Uri is retained only while this activity is open so
     // useful, GPS-free camera EXIF can be copied into an exported JPEG.
     private var selectedSourceUri: Uri? = null
+    private var sourceProfile = ColourProfileBridge.InputProfile.SRGB
     private var highResolutionEnabled = false
     private lateinit var highResolutionCheckBox: CheckBox
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -111,7 +112,8 @@ class MainActivity : ComponentActivity() {
                 selectedSourceUri = uri
                 showOriginal = false
                 image.setImageBitmap(bitmap)
-                info.text = "${bitmap.width} × ${bitmap.height} • ${polishedStyle.label} selected"
+                info.text = "${bitmap.width} × ${bitmap.height} • ${polishedStyle.label} selected" +
+                    " • Camera profile: ${sourceProfile.label}"
             } catch (e: Exception) {
                 errorMessage("Cannot open image", e)
             } finally {
@@ -218,6 +220,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        // High-res is irrelevant to the user's standard 12MP shooting. The
+        // existing v0.4.7 option stays compiled but is hidden in this test.
+        highResolutionCheckBox.visibility = View.GONE
         root.addView(highResolutionCheckBox, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
@@ -483,6 +488,9 @@ class MainActivity : ComponentActivity() {
     private fun decodePhoto(uri: Uri, highRes: Boolean): Bitmap {
         val source = ImageDecoder.createSource(contentResolver, uri)
         return ImageDecoder.decodeBitmap(source) { decoder, imageInfo, _ ->
+            // Inspect the original embedded ICC before asking for the
+            // unchanged approved sRGB neural/Polished working pixels.
+            sourceProfile = ColourProfileBridge.detect(imageInfo.colorSpace)
             val width = imageInfo.size.width
             val height = imageInfo.size.height
             val heapMiB = Runtime.getRuntime().maxMemory() / (1024 * 1024)
@@ -829,12 +837,12 @@ class MainActivity : ComponentActivity() {
             setBusy(true)
             try {
                 val save = withContext(Dispatchers.IO) {
-                    writeJpeg(output, selectedSourceUri)
+                    writeJpeg(output, selectedSourceUri, original, sourceProfile)
                 }
-                info.text = "Saved to Pictures/AutoPhoto" +
+                info.text = "Saved to Pictures/AutoPhoto • ${save.profileUsed}" +
                     (if (save.cameraDetailsCopied)
-                        " • camera details kept (GPS removed)"
-                    else " • camera details unavailable")
+                        " • EXIF kept (no GPS)"
+                    else " • EXIF unavailable")
                 Toast.makeText(this@MainActivity, "Saved: ${save.uri}",
                     Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
@@ -845,7 +853,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private data class SavedPhoto(val uri: Uri, val cameraDetailsCopied: Boolean)
+    private data class SavedPhoto(val uri: Uri, val cameraDetailsCopied: Boolean,
+                                  val profileUsed: String)
 
     // Whitelist only useful non-location camera tags. Never copy GPS,
     // maker notes, camera serials, thumbnails, user comments, or proprietary
@@ -888,8 +897,18 @@ class MainActivity : ComponentActivity() {
     }
 
     /** A half-written photo is deleted if saving fails. */
-    private fun writeJpeg(bitmap: Bitmap, source: Uri?): SavedPhoto {
+    private fun writeJpeg(bitmap: Bitmap, source: Uri?, workingSrgb: Bitmap?,
+                          profile: ColourProfileBridge.InputProfile): SavedPhoto {
         val cameraTags = safeCameraTags(source)
+        // The learned LUT and Polished processing remain in sRGB. This is
+        // output-only gamut recovery for detected source Display P3 JPEGs.
+        val p3Encoded = if (profile == ColourProfileBridge.InputProfile.P3 &&
+            source != null && workingSrgb != null) {
+            try {
+                ColourProfileBridge.encodeP3(
+                    contentResolver, source, workingSrgb, bitmap)
+            } catch (_: Exception) { null }
+        } else null
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, "autophoto_${System.currentTimeMillis()}.jpg")
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
@@ -899,8 +918,11 @@ class MainActivity : ComponentActivity() {
         val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
             ?: error("MediaStore refused to create file")
         try {
-            contentResolver.openOutputStream(uri)?.use {
-                check(bitmap.compress(Bitmap.CompressFormat.JPEG, 98, it)) { "JPEG encoding failed" }
+            contentResolver.openOutputStream(uri)?.use { stream ->
+                if (p3Encoded != null) stream.write(p3Encoded.bytes)
+                else check(bitmap.compress(Bitmap.CompressFormat.JPEG, 98, stream)) {
+                    "JPEG encoding failed"
+                }
             } ?: error("Could not open destination")
             var copied = false
             if (cameraTags.isNotEmpty()) {
@@ -919,10 +941,44 @@ class MainActivity : ComponentActivity() {
                     copied = true
                 } ?: error("JPEG metadata write descriptor unavailable")
             }
+            // Metadata editing may rewrite JPEG APP segments. Independently
+            // verify the saved file AFTER EXIF write, not just before it.
+            val validP3 = p3Encoded != null && try {
+                ColourProfileBridge.isVerifiedP3(contentResolver, uri)
+            } catch (_: Exception) { false }
+            if (p3Encoded != null && !validP3) {
+                // Never leave a wrong/missing ICC tag on P3 pixel data.
+                // Rewrite the approved sRGB raster (not its P3 bytes).
+                contentResolver.openOutputStream(uri,"wt")?.use { stream ->
+                    check(bitmap.compress(Bitmap.CompressFormat.JPEG, 98, stream)) {
+                        "Failed to restore safe sRGB JPEG"
+                    }
+                } ?: error("Could not restore sRGB JPEG")
+                copied = false
+                if (cameraTags.isNotEmpty()) {
+                    contentResolver.openFileDescriptor(uri,"rw")?.use { fd ->
+                        val target=ExifInterface(fd.fileDescriptor)
+                        for ((tag,value) in cameraTags) target.setAttribute(tag,value)
+                        target.setAttribute(ExifInterface.TAG_ORIENTATION,
+                            ExifInterface.ORIENTATION_NORMAL.toString())
+                        target.setAttribute(ExifInterface.TAG_PIXEL_X_DIMENSION,
+                            bitmap.width.toString())
+                        target.setAttribute(ExifInterface.TAG_PIXEL_Y_DIMENSION,
+                            bitmap.height.toString())
+                        target.saveAttributes()
+                        copied = true
+                    }
+                }
+            }
             contentResolver.update(uri, ContentValues().apply {
                 put(MediaStore.Images.Media.IS_PENDING, 0)
             }, null, null)
-            return SavedPhoto(uri, copied)
+            return SavedPhoto(uri, copied, when {
+                validP3 -> "Display P3 (ICC verified)"
+                profile == ColourProfileBridge.InputProfile.P3 ->
+                    "sRGB (safe P3 fallback)"
+                else -> "sRGB"
+            })
         } catch (e: Exception) {
             contentResolver.delete(uri, null, null)
             throw e
