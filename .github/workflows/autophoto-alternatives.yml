@@ -1,7 +1,7 @@
-name: Build AutoPhoto Auto Profile v0.4.8
+name: Build AutoPhoto Studio Clean v0.4.9
 on:
   push:
-    branches: [autophoto-auto-profile-v048]
+    branches: [autophoto-studio-clean-v049]
   workflow_dispatch:
 permissions:
   contents: write
@@ -28,6 +28,7 @@ jobs:
           python3 -m pip install --quiet "onnxruntime==1.20.1" "huggingface_hub==0.36.0"
           python3 scripts/prepare_alternatives.py
           python3 scripts/prepare_scene.py
+          python3 scripts/prepare_studio_clean.py
       - name: Configure Android SDK
         shell: bash
         run: |
@@ -47,7 +48,8 @@ jobs:
           apk=next(pathlib.Path("app/build/outputs/apk/debug").glob("*.apk"))
           with zipfile.ZipFile(apk) as z:
               for name in ["assets/mobileie_lolv1.tflite","assets/lut_classifier.onnx",
-                           "assets/lut_basis_33.bin","assets/skywater_segformer_b2_fp32.onnx"]:
+                           "assets/lut_basis_33.bin","assets/skywater_segformer_b2_fp32.onnx",
+                           "assets/studio_dncnn_color_blind.onnx"]:
                   item=z.getinfo(name)
                   print(name, item.file_size,"bytes")
                   assert item.file_size>10000
@@ -80,7 +82,7 @@ jobs:
           assert "fun enhanceAdaptiveStrong(" in p
           assert "localMinimumY" in p and "skinGuide" in p and "skyGuide" in p
           assert all(t in ui for t in ["ImageProcessor.correct(input)", "MaskedAIProcessor.enhanceScene", "detailProgressActive = false"])
-          assert "applicationId = \"com.example.autophoto.profile.v048\"" in Path("app/build.gradle.kts").read_text()
+          assert "applicationId = \"com.example.autophoto.studioclean.v049\"" in Path("app/build.gradle.kts").read_text()
           polished=Path("app/src/main/java/com/example/autophoto/PolishedAIProcessor.kt").read_text()
           assert all(t in polished for t in [
               'AlternativeAIProcessor.adaptiveLut(',
@@ -120,7 +122,7 @@ jobs:
           assert "Other RGB → sRGB" in bridge
           assert "ExifInterface.TAG_ORIENTATION" in ui
           assert "ExifInterface.TAG_GPS" not in ui
-          assert "applicationId = \"com.example.autophoto.profile.v048\"" in Path("app/build.gradle.kts").read_text()
+          assert "applicationId = \"com.example.autophoto.studioclean.v049\"" in Path("app/build.gradle.kts").read_text()
           import hashlib
           # Git blob SHA of the approved v0.4.6 processor. This checks the
           # actual file bytes without depending on Git checkout ancestry.
@@ -132,7 +134,22 @@ jobs:
               "Approved Polished processor has changed: " + blob
           )
           assert "for (button in arrayOf(openButton, saveButton))" in ui
-          assert "root.addView(polishedButton," in ui
+          assert "private fun updatePreviewStatus()" in ui
+          assert "Viewing: ORIGINAL" in ui
+          assert 'Saved: " + save.profileUsed' in ui
+          assert "highResolutionCheckBox.visibility = View.GONE" in ui
+          assert "root.addView(finishingControls" in ui
+          assert "polishedRow.visibility = View.GONE" in ui
+          assert "private fun runStudioClean()" in ui
+          studio=Path("app/src/main/java/com/example/autophoto/StudioCleanProcessor.kt").read_text()
+          assert "StudioCleanProcessor.enhance(" in ui
+          assert "studio_dncnn_color_blind.onnx" in studio
+          assert "PolishedAIProcessor.Style.POLISHED" in studio
+          assert "MAX_TILES=12" in studio
+          assert "denY-luminance(o)" in studio
+          assert "return Result(polished.bitmap" in studio
+          assert "decodePhoto(uri, highResolutionEnabled)" in ui
+          assert "root.addView(finishingControls," in ui
           assert "root.addView(polishedRow," in ui
           assert not any("root.addView(" + legacy + "," in ui for legacy in [
               "maskedButton", "semanticButton", "sceneButton", "detailButton",
@@ -144,7 +161,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AutoPhoto-Profile-v0.4.8-APK
+          name: AutoPhoto-Studio-Clean-v0.4.9-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
@@ -152,21 +169,24 @@ jobs:
         if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: autophoto-auto-profile-v0.4.8
-          name: AutoPhoto Auto Profile v0.4.8 — P3 and sRGB
+          tag_name: autophoto-studio-clean-v0.4.9
+          name: AutoPhoto Studio Clean v0.4.9 — Restoration A/B
           make_latest: false
           generate_release_notes: false
           body: |
-            v0.4.8 experimental automatic ICC detection and P3/sRGB export.
-            Native sRGB originals retain the approved Polished sRGB workflow.
-            P3 originals receive a correctly converted P3 JPEG with original
-            out-of-sRGB chroma restored after the unchanged Polished engine.
-            JPEG APP2 ICC + decoded P3 space are checked before and after
-            GPS-free EXIF copying. Any unsupported P3 path falls back to
-            unchanged sRGB, never mislabels the pixels. Other RGB profiles
-            use validated sRGB conversion. The unused hi-res control is hidden.
-            Unique app ID keeps v0.4.6 and v0.4.7 untouched. Phone testing
-            is required before wide-gamut quality claims are accepted.
+            v0.4.9 Studio Clean is a BULK QC experiment (NOT a new approved
+            Polished look). Unchanged approved v0.4.6 Polished processor
+            and pretrained ONNX adaptive LUT. Additional offline pretrained
+            DnCNN colour-blind denoiser from cszn/KAIR, built as ONNX and
+            applied only to limited noisy image patches with guarded
+            luminance-only fusion. Original photo remains untouched.
+            New two-button Polished/Studio Clean A/B UI; persistent true
+            ORIGINAL/PROCESSED label; explicit input ICC and saved output ICC;
+            accurate technical diagnostics replacing misleading 'adjusted'
+            and 'clipping' claims. sRGB/P3 profile matching retained with
+            verified-P3 or safe sRGB fallback. Safe GPS-free EXIF preserved.
+            Unique app ID keeps 0.4.6, 0.4.7 and 0.4.8 untouched.
+            Model/runtime and actual photographic benefit need phone testing.
           files: app/build/outputs/apk/debug/*.apk
           fail_on_unmatched_files: true
           overwrite_files: true

@@ -7,6 +7,7 @@ import android.graphics.ColorSpace
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.os.Environment
 import android.provider.MediaStore
 import android.view.Gravity
@@ -81,6 +82,10 @@ class MainActivity : ComponentActivity() {
     private var detailStrength = LocalDetailProcessor.Strength.STRONG
     private var detailProgressActive = false
     private lateinit var saveButton: Button
+    private lateinit var studioButton: Button
+    private lateinit var previewStatus: TextView
+    private lateinit var colourStatus: TextView
+    private var currentFinish = "Polished"
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) loadPhoto(uri)
@@ -110,8 +115,10 @@ class MainActivity : ComponentActivity() {
                 original = bitmap
                 corrected = null
                 selectedSourceUri = uri
-                showOriginal = false
+                showOriginal = true
                 image.setImageBitmap(bitmap)
+                colourStatus.text = "Input: ${sourceProfile.label} • Output: not saved"
+                updatePreviewStatus()
                 info.text = "${bitmap.width} × ${bitmap.height} • ${polishedStyle.label} selected" +
                     " • Camera profile: ${sourceProfile.label}"
             } catch (e: Exception) {
@@ -335,13 +342,27 @@ class MainActivity : ComponentActivity() {
             minHeight = (48 * resources.displayMetrics.density).roundToInt()
             setOnClickListener { runPolishedAI() }
         }
-        root.addView(polishedButton, LinearLayout.LayoutParams(
+        studioButton = Button(this).apply {
+            text = "Studio Clean AI"
+            isAllCaps = false
+            textSize = 12f
+            minHeight = (48 * resources.displayMetrics.density).roundToInt()
+            setOnClickListener { runStudioClean() }
+        }
+        val finishingControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        for (button in arrayOf(polishedButton, studioButton)) {
+            button.minWidth = 0
+            finishingControls.addView(button, LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+            ).apply { marginStart = pad / 4; marginEnd = pad / 4 })
+        }
+        root.addView(finishingControls, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply {
-            marginStart = pad / 4
-            marginEnd = pad / 4
-        })
+        ))
         val polishedRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -373,6 +394,7 @@ class MainActivity : ComponentActivity() {
         // Hidden, not removed: restores easily if a later experiment wins.
         polishWowButton = addPolishedChoice(
             "Wow", PolishedAIProcessor.Style.WOW, visible = false)
+        polishedRow.visibility = View.GONE // historical presets retained
         root.addView(polishedRow, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
@@ -387,6 +409,18 @@ class MainActivity : ComponentActivity() {
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         ))
+        previewStatus = TextView(this).apply {
+            text = "Viewing: ORIGINAL"
+            gravity = Gravity.CENTER
+            textSize = 12f
+        }
+        root.addView(previewStatus)
+        colourStatus = TextView(this).apply {
+            text = "Input: not loaded • Output: not saved"
+            gravity = Gravity.CENTER
+            textSize = 11f
+        }
+        root.addView(colourStatus)
         // A dedicated result panel survives preview taps and saves.
         sceneDiagnostics = TextView(this).apply {
             visibility = View.GONE
@@ -413,8 +447,7 @@ class MainActivity : ComponentActivity() {
                 if (corrected != null) {
                     showOriginal = !showOriginal
                     setImageBitmap(if (showOriginal) original else corrected)
-                    info.text = if (showOriginal) "Original — tap photo to compare"
-                        else "Corrected — tap photo to compare"
+                    updatePreviewStatus()
                 }
             }
         }
@@ -426,6 +459,14 @@ class MainActivity : ComponentActivity() {
         setContentView(root)
         ViewCompat.requestApplyInsets(root)
         setBusy(false)
+    }
+
+    private fun updatePreviewStatus() {
+        previewStatus.text = if (corrected == null || showOriginal)
+            "Viewing: ORIGINAL" + (if (corrected != null)
+                " • tap for " + currentFinish else "")
+        else "Viewing: " + currentFinish.uppercase() + " • tap for original"
+        image.contentDescription = previewStatus.text
     }
 
     private fun refreshDetailStrengthButtons() {
@@ -472,6 +513,7 @@ class MainActivity : ComponentActivity() {
         detailStrongButton.isEnabled = !busy && original != null
         detailAdaptiveButton.isEnabled = !busy && original != null
         polishedButton.isEnabled = !busy && original != null
+        studioButton.isEnabled = !busy && original != null
         polishNormalButton.isEnabled = !busy && original != null
         polishPlusButton.isEnabled = !busy && original != null
         polishWowButton.isEnabled = !busy && original != null
@@ -801,17 +843,19 @@ class MainActivity : ComponentActivity() {
                 corrected = result.bitmap
                 showOriginal = false
                 image.setImageBitmap(result.bitmap)
-                sceneDiagnostics.text = "Polished AI Lab v0.4.3" +
+                currentFinish = "Polished"
+                updatePreviewStatus()
+                sceneDiagnostics.text = "Polished reference • no restoration" +
                     " • " + result.style.label + "\n" +
                     "Total: " + "%.1f".format(result.totalMs/1000.0) +
                     "s • Neural inference: " +
                     "%.1f".format(result.neuralMs/1000.0) + "s" +
-                    "\nAdjusted pixels: " +
+                    "\nPixels numerically changed: " +
                     "%.1f".format(result.changedPercent) + "%" +
                     " • Original / result luminance: " +
                     "%.1f".format(result.beforeMeanY) + " → " +
                     "%.1f".format(result.afterMeanY) +
-                    "\nClipping-risk pixels: " +
+                    "\nPre-clamp gamut-pressure candidates: " +
                     "%.1f".format(result.clippedChannelPercent) + "%" +
                     (if (result.darkSceneProtected)
                         " • Night/black-background protection active" else "")
@@ -831,6 +875,42 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun runStudioClean() {
+        val source = original ?: return
+        scope.launch {
+            setBusy(true)
+            sceneDiagnostics.visibility = View.VISIBLE
+            sceneDiagnostics.text = "Studio Clean: inspecting noisy regions…"
+            info.text = "Studio Clean: starting offline AI…"
+            try {
+                val began = SystemClock.elapsedRealtime()
+                val result = withContext(Dispatchers.Default) {
+                    StudioCleanProcessor.enhance(this@MainActivity,source) { pct ->
+                        runOnUiThread { info.text = "Studio Clean • " + pct + "%" }
+                    }
+                }
+                corrected = result.bitmap
+                showOriginal = false
+                currentFinish = "Studio Clean"
+                image.setImageBitmap(result.bitmap)
+                updatePreviewStatus()
+                sceneDiagnostics.text = "Studio Clean v0.4.9" +
+                    "\nNoisy tiles detected: " + result.appliedTiles +
+                    " of " + result.examinedTiles +
+                    "\nEstimated noise: " +
+                    "%.2f".format(result.estimatedNoise) +
+                    " • AI: " + (if(result.aiUsed) "applied" else "bypassed") +
+                    "\n" + result.message +
+                    "\nElapsed: " +
+                    "%.1f".format((SystemClock.elapsedRealtime()-began)/1000.0) + "s"
+                info.text = "Studio Clean ready • tap preview to compare"
+            } catch (e: Exception) {
+                sceneDiagnostics.text = "Studio Clean unavailable; input unchanged"
+                errorMessage("Studio Clean failed",e)
+            } finally { setBusy(false) }
+        }
+    }
+
     private fun savePhoto() {
         val output = corrected ?: return
         scope.launch {
@@ -839,6 +919,8 @@ class MainActivity : ComponentActivity() {
                 val save = withContext(Dispatchers.IO) {
                     writeJpeg(output, selectedSourceUri, original, sourceProfile)
                 }
+                colourStatus.text = "Input: " + sourceProfile.label +
+                    " • Saved: " + save.profileUsed
                 info.text = "Saved to Pictures/AutoPhoto • ${save.profileUsed}" +
                     (if (save.cameraDetailsCopied)
                         " • EXIF kept (no GPS)"
