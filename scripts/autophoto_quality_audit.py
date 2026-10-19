@@ -8,26 +8,48 @@ Example: python autophoto_quality_audit.py --reference Samsung-original.jpg \
 Use an untouched full-resolution original for meaningful source-to-export
 analysis. Different edits or ChatGPT-resized uploads can still be compared,
 but they cannot establish genuine recovered detail or source resolution.
+Colour comparisons convert every embedded ICC profile to sRGB first; without
+this, a P3 Samsung original and an sRGB Android export are incomparable.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageCms
 
 
 def inspect(path: Path) -> tuple[dict[str, Any], np.ndarray]:
     if not path.is_file():
         raise FileNotFoundError(path)
     with Image.open(path) as image:
-        # EXIF orientation is respected; other identifying EXIF is NOT exported.
+        # EXIF orientation is respected. Do not surface EXIF content, GPS or IDs.
         oriented = ImageOps.exif_transpose(image)
-        rgb = np.asarray(oriented.convert('RGB'), dtype=np.uint8)
+        embedded_icc = image.info.get('icc_profile')
+        if embedded_icc:
+            try:
+                src_profile = ImageCms.ImageCmsProfile(BytesIO(embedded_icc))
+                profile_name = ImageCms.getProfileDescription(src_profile).strip()
+                # For photographic comparisons, all pixels must use the
+                # same display-referred colour space before subtraction.
+                corrected = ImageCms.profileToProfile(
+                    oriented, src_profile, ImageCms.createProfile('sRGB'),
+                    renderingIntent=0, outputMode='RGB'
+                )
+            except Exception as exc:
+                raise ValueError('Cannot normalize embedded ICC profile to sRGB; '
+                                 'comparison would be unreliable') from exc
+        else:
+            # JPEGs without an ICC profile are assumed to be sRGB; report
+            # that uncertainty rather than silently declaring a match.
+            profile_name = 'unprofiled (assumed sRGB)'
+            corrected = oriented.convert('RGB')
+        rgb = np.asarray(corrected, dtype=np.uint8)
         exif_count = len(image.getexif())
         info = {
             'filename': path.name,
@@ -36,7 +58,9 @@ def inspect(path: Path) -> tuple[dict[str, Any], np.ndarray]:
             'file_bytes': path.stat().st_size,
             'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
             'format': image.format,
-            'icc_embedded': bool(image.info.get('icc_profile')),
+            'icc_embedded': bool(embedded_icc),
+            'source_icc_profile': profile_name,
+            'comparison_colour_space': 'sRGB',
             'exif_fields_present': exif_count > 0,
         }
     return info, rgb
@@ -93,8 +117,13 @@ def audit(refpath: Path, candpath: Path) -> dict[str, Any]:
     if min(max(a.shape[:2]), max(b.shape[:2])) < 4096:
         warnings.append('At least one supplied image is under 4096 px on its long side. '
                         'If resized for chat, it cannot validate native S23 Ultra source detail.')
-    if refmeta['icc_embedded'] != candmeta['icc_embedded']:
-        warnings.append('Only one image has an embedded ICC profile; sRGB assumption might be invalid.')
+    if not refmeta['icc_embedded'] or not candmeta['icc_embedded']:
+        warnings.append('At least one file lacks an ICC profile; its RGB values '
+                        'are assumed to be sRGB rather than verified.')
+    if refmeta['source_icc_profile'] != candmeta['source_icc_profile']:
+        warnings.append('Input and export colour profiles differ: they have been '
+                        'converted to common sRGB for statistics. Conversion '
+                        'from P3 to sRGB may itself affect saturated colours.')
     if not refmeta['exif_fields_present']:
         warnings.append('Reference lacks EXIF fields. Confirm it is the untouched camera original.')
     return {
@@ -102,7 +131,9 @@ def audit(refpath: Path, candpath: Path) -> dict[str, Any]:
         'candidate': {**candmeta, 'metrics': image_metrics(b)},
         'paired_metrics': compare(a, b),
         'warnings': warnings,
-        'note': 'Read-only diagnostic. No original/processed photo or metadata is uploaded by this script.',
+        'note': 'Read-only, ICC-normalized diagnostic. No photographs or raw metadata '
+                'are uploaded. A metadata-preservation feature must exclude GPS '
+                'and other identifying fields unless specifically requested.',
     }
 
 
