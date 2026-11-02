@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/test_title"
+            android:textColor="@color/text"
+            android:textSize="24sp"
+            android:textStyle="bold" />
+
+        <TextView
+            style="@style/Muted"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/test_intro" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="96dp"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal">
+
+            <View android:layout_width="0dp" android:layout_height="match_parent"
+                android:layout_weight="1" android:background="#FFFF0000" />
+            <View android:layout_width="0dp" android:layout_height="match_parent"
+                android:layout_weight="1" android:background="#FF00FF00" />
+            <View android:layout_width="0dp" android:layout_height="match_parent"
+                android:layout_weight="1" android:background="#FF0000FF" />
+            <View android:layout_width="0dp" android:layout_height="match_parent"
+                android:layout_weight="1" android:background="#FFD8A07A" />
+            <View android:layout_width="0dp" android:layout_height="match_parent"
+                android:layout_weight="1" android:background="#FF5F8F4A" />
+            <View android:layout_width="0dp" android:layout_height="match_parent"
+                android:layout_weight="1" android:background="#FF6FA8DC" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/modeButtons"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical" />
+
+        <Switch
+            android:id="@+id/mdnieSwitch"
+            style="@style/Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:minHeight="48dp"
+            android:text="@string/use_mdnie" />
+
+        <Button
+            android:id="@+id/runReport"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/run_report" />
+
+        <TextView
+            android:id="@+id/result"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/card"
+            android:fontFamily="monospace"
+            android:padding="12dp"
+            android:text="@string/result_idle"
+            android:textColor="@color/text"
+            android:textIsSelectable="true"
+            android:textSize="12sp" />
+    </LinearLayout>
+</ScrollView>
