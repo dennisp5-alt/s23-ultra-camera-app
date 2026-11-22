@@ -7,18 +7,34 @@ android {
  namespace = "com.dennisp.s23lab"
  compileSdk = 36
  defaultConfig {
-  applicationId = "com.dennisp.s23lab.v3"
+  // One stable id from v0.4 on, so later versions upgrade in place and keep the imported model.
+  // (v0.1 to v0.3 used .v1/.v2/.v3; this installs alongside them.)
+  applicationId = "com.dennisp.s23lab"
   minSdk = 26
   targetSdk = 35
-  versionCode = 3
-  versionName = "0.3.0"
+  versionCode = 4
+  versionName = "0.4.0"
+ }
+ // A fixed key lets builds upgrade in place. CI supplies it from repository secrets when they exist;
+ // without them the build falls back to the runner's random debug key (uninstall needed between builds).
+ val labStore = System.getenv("LAB_SIGNING_STORE_FILE")
+ signingConfigs {
+  if (!labStore.isNullOrBlank()) create("lab") {
+   storeFile = file(labStore)
+   storePassword = System.getenv("LAB_SIGNING_STORE_PASSWORD")
+   keyAlias = System.getenv("LAB_SIGNING_KEY_ALIAS")
+   keyPassword = System.getenv("LAB_SIGNING_KEY_PASSWORD")
+  }
+ }
+ buildTypes {
+  getByName("debug") { if (!labStore.isNullOrBlank()) signingConfig = signingConfigs.getByName("lab") }
  }
  compileOptions {
   sourceCompatibility = JavaVersion.VERSION_17
   targetCompatibility = JavaVersion.VERSION_17
  }
  kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
- buildFeatures { compose = true }
+ buildFeatures { compose = true; buildConfig = true }
  packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
 }
 dependencies {
@@ -33,4 +49,6 @@ dependencies {
  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
  implementation("com.google.ai.edge.litertlm:litertlm-android:0.19.0")
  testImplementation("junit:junit:4.13.2")
+ // Real JSON parser for checking exported files in JVM unit tests (Android's org.json is a stub there).
+ testImplementation("org.json:json:20240303")
 }

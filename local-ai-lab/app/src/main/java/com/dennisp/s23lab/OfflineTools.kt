@@ -16,7 +16,9 @@ object OfflineTools {
   temp.matchEntire(s)?.let {
    val x=it.groupValues[1].toDoubleOrNull()?:return null
    val a=it.groupValues[2].uppercase(Locale.ROOT);val b=it.groupValues[3].uppercase(Locale.ROOT)
-   if(!x.isFinite()||x !in -459.67..10000.0) return null
+   // Reject temperatures below absolute zero for the given unit (-273.15 °C, -459.67 °F).
+   val floor=if(a=="C") -273.15 else -459.67
+   if(!x.isFinite()||x<floor||x>10000.0) return null
    val y=if(a==b)x else if(a=="C") x*9/5+32 else (x-32)*5/9
    return Answer("Temperature", f(x)+"°"+a+" = "+f(y)+"°"+b)
   }
@@ -29,7 +31,8 @@ object OfflineTools {
   dew.matchEntire(s)?.let {
    val t=it.groupValues[1].toDoubleOrNull()?:return null
    val rh=it.groupValues[2].toDoubleOrNull()?:return null
-   if(!t.isFinite()||!rh.isFinite()||t !in -45.0..60.0||rh !in 1.0..100.0) return null
+   // Magnus constants 17.625 / 243.04 (Alduchov and Eskridge) are intended for about -40 to 50 °C.
+   if(!t.isFinite()||!rh.isFinite()||t !in -40.0..50.0||rh !in 1.0..100.0) return null
    val g=ln(rh/100.0)+17.625*t/(243.04+t)
    val d=243.04*g/(17.625-g)
    return Answer("Dew point estimate",f(t)+"°C at "+f(rh)+"% RH → approximately "+f(d)+"°C")
