@@ -183,54 +183,60 @@ class LabViewModel(application: Application) : AndroidViewModel(application) {
         val runs = mutableListOf<BenchProtocol.Run>()
         _ui.update { it.copy(benchRuns = emptyList(), benchConfig = config.name) }
         val path = store.modelFile.path
-        backendLoop@ for (b in backends) {
-            val gpu = b == Backend.GPU
-            val name = if (gpu) "GPU" else "CPU"
-            // 1) Synthetic: exact token counts, fresh engine each run.
-            val ctx = ui.value.maxNumTokens
-            for ((li, len) in config.prefillLengths.withIndex()) {
-                val warmups = config.warmupsFor(li)
-                for (i in 0 until warmups + config.runs) {
-                    if (stopRequested) break@backendLoop
+        val ctx = ui.value.maxNumTokens
+        val failed = mutableSetOf<Backend>()
+        fun nameOf(b: Backend) = if (b == Backend.GPU) "GPU" else "CPU"
+        // 1) Synthetic: exact token counts, fresh engine each run. Backends are interleaved and the order flips
+        // every run, so slow drifts in clocks and temperature affect CPU and GPU equally. (Run in blocks, the
+        // GPU slowed to about 60% after the CPU block, then recovered over 10 runs.)
+        synthetic@ for ((li, len) in config.prefillLengths.withIndex()) {
+            val warmups = config.warmupsFor(li)
+            for (i in 0 until warmups + config.runs) {
+                for (b in if (i % 2 == 0) backends else backends.reversed()) {
+                    if (b in failed) continue
+                    if (stopRequested) break@synthetic
                     val gate = device.gate()
-                    if (!gate.ok) { notice(gate.reason); break@backendLoop }
+                    if (!gate.ok) { notice(gate.reason); break@synthetic }
+                    val name = nameOf(b)
                     progress(name + " synthetic, prefill " + len + ": run " + (i + 1) + "/" + (warmups + config.runs) + (if (i < warmups) " (warm-up)" else ""))
                     val run = measured(name, BenchProtocol.SYNTHETIC, "prefill $len", len, i < warmups, i, ctx) {
                         // Same context as the prompt runs, so the two kinds are comparable.
-                        val info = engine.syntheticBenchmark(path, gpu, len, config.decodeTokens, ctx)
+                        val info = engine.syntheticBenchmark(path, b == Backend.GPU, len, config.decodeTokens, ctx)
                         Measured(info.initTimeInSecond, info.timeToFirstTokenInSecond, info.lastPrefillTokenCount,
                             info.lastDecodeTokenCount, info.lastPrefillTokensPerSecond, info.lastDecodeTokensPerSecond, "")
                     }
                     runs += run
                     _ui.update { it.copy(benchRuns = runs.toList()) }
                     // A GPU that cannot start will not start on the next run either.
-                    if (!run.ok && i == 0) { notice(name + " failed: " + run.error); continue@backendLoop }
+                    if (!run.ok && i == 0) { failed += b; notice(name + " failed: " + run.error) }
                 }
-            }
-            // 2) Real prompts on a loaded engine.
-            if (config.promptRuns > 0) {
-                val state = engine.load(path, gpu, ctx, fallbackToCpu = false)
-                if (!state.loaded) { notice(state.message); continue@backendLoop }
-                for ((label, prompt) in BenchProtocol.PROMPTS) {
-                    for (i in 0 until 1 + config.promptRuns) {
-                        if (stopRequested) break@backendLoop
-                        val gate = device.gate()
-                        if (!gate.ok) { notice(gate.reason); break@backendLoop }
-                        progress(name + " prompt '" + label + "': run " + (i + 1) + "/" + (1 + config.promptRuns) + (if (i == 0) " (warm-up)" else ""))
-                        runs += measured(name, BenchProtocol.PROMPT, label, 0, i == 0, i, ctx) {
-                            val r = engine.generate(prompt, LabEngine.GenOptions(system = "Answer briefly and factually.", maxOutputTokens = config.maxOutputTokens))
-                            val info = r.info
-                            if (r.error != null || info == null) error(r.error ?: "No benchmark info")
-                            Measured(if (i == 0) state.loadMs / 1000.0 else Double.NaN, info.timeToFirstTokenInSecond,
-                                info.lastPrefillTokenCount, info.lastDecodeTokenCount, info.lastPrefillTokensPerSecond,
-                                info.lastDecodeTokensPerSecond, r.text.take(160))
-                        }
-                        _ui.update { it.copy(benchRuns = runs.toList()) }
-                    }
-                }
-                engine.unload("Benchmark finished; model unloaded.")
             }
         }
+        // 2) Real prompts on a loaded engine, one backend at a time (loading is too slow to interleave).
+        if (config.promptRuns > 0 && !stopRequested) promptLoop@ for (b in backends) {
+            if (b in failed) continue
+            val name = nameOf(b)
+            val state = engine.load(path, b == Backend.GPU, ctx, fallbackToCpu = false)
+            if (!state.loaded) { notice(state.message); continue@promptLoop }
+            for ((label, prompt) in BenchProtocol.PROMPTS) {
+                for (i in 0 until 1 + config.promptRuns) {
+                    if (stopRequested) break@promptLoop
+                    val gate = device.gate()
+                    if (!gate.ok) { notice(gate.reason); break@promptLoop }
+                    progress(name + " prompt '" + label + "': run " + (i + 1) + "/" + (1 + config.promptRuns) + (if (i == 0) " (warm-up)" else ""))
+                    runs += measured(name, BenchProtocol.PROMPT, label, 0, i == 0, i, ctx) {
+                        val r = engine.generate(prompt, LabEngine.GenOptions(system = "Answer briefly and factually.", maxOutputTokens = config.maxOutputTokens))
+                        val info = r.info
+                        if (r.error != null || info == null) error(r.error ?: "No benchmark info")
+                        Measured(if (i == 0) state.loadMs / 1000.0 else Double.NaN, info.timeToFirstTokenInSecond,
+                            info.lastPrefillTokenCount, info.lastDecodeTokenCount, info.lastPrefillTokensPerSecond,
+                            info.lastDecodeTokensPerSecond, r.text.take(160))
+                    }
+                    _ui.update { it.copy(benchRuns = runs.toList()) }
+                }
+            }
+        }
+        engine.unload("Benchmark finished; model unloaded.")
         progress(if (stopRequested) "Stopped. " + runs.size + " runs recorded." else "Finished: " + runs.size + " runs.")
     }
 

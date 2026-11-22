@@ -12,8 +12,8 @@ android {
   applicationId = "com.dennisp.s23lab"
   minSdk = 26
   targetSdk = 35
-  versionCode = 5
-  versionName = "0.4.1"
+  versionCode = 6
+  versionName = "0.4.2"
  }
  // A fixed key lets builds upgrade in place. CI supplies it from repository secrets when they exist;
  // without them the build falls back to the runner's random debug key (uninstall needed between builds).

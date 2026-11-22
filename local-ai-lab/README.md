@@ -1,4 +1,4 @@
-# S23 Local AI Lab v0.4.1
+# S23 Local AI Lab v0.4.2
 
 Experimental Android app for private, on-device language-model tests on the Galaxy S23 Ultra, using Google LiteRT-LM (`litertlm-android` 0.19.0) on CPU and GPU. Test build only: no `INTERNET` permission, no telemetry, no external inference API.
 
@@ -60,3 +60,8 @@ Run with the phone unplugged, starting cool.
 - The first prompt length of each backend gets 2 extra warm-ups. On the S23 Ultra the first GPU loads took 17–24 s and decoded at about half speed.
 - The leak test compares cycles with the first unload, not with idle before any load. The first S23 Ultra profile (52 MB kept after the first load, then flat at +0.4 MB per cycle) now passes, as it should.
 - Summaries say how many runs were on charge.
+
+## v0.4.2 (after the second S23 Ultra run, 22 Nov 2026)
+
+- Synthetic runs interleave CPU and GPU and flip the order every run. Run in blocks, the GPU slowed to about 60% straight after the CPU block, then recovered over about 10 runs. That made the first GPU group unstable however many warm-ups it had.
+- Added a 768-token context option. At 512, decode ran 1.9× faster on CPU and 1.35× faster on GPU than at 1280, so the best context size for real tasks needs finding.

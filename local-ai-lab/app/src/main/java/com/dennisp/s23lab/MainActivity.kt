@@ -144,7 +144,7 @@ private fun LabScreen(vm: LabViewModel, save: (Uri, String) -> Unit, share: (Str
             }
             Text("Context (maxNumTokens)", color = muted, style = MaterialTheme.typography.bodySmall)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                for (n in listOf(512, 1024, 1280, null)) FilterChip(selected = ui.maxNumTokens == n, onClick = { vm.setMaxNumTokens(n) },
+                for (n in listOf(512, 768, 1024, 1280, null)) FilterChip(selected = ui.maxNumTokens == n, onClick = { vm.setMaxNumTokens(n) },
                     label = { Text(n?.toString() ?: "Model default") }, enabled = !busy && !engine.loaded)
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
