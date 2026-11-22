@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
- <application android:label="S23 Local AI Lab v0.3" android:icon="@drawable/ic_lab" android:roundIcon="@drawable/ic_lab" android:allowBackup="false" android:usesCleartextTraffic="false" android:theme="@android:style/Theme.Material.NoActionBar">
+ <application android:label="S23 Local AI Lab v0.4" android:icon="@drawable/ic_lab" android:roundIcon="@drawable/ic_lab" android:allowBackup="false" android:usesCleartextTraffic="false" android:theme="@android:style/Theme.Material.NoActionBar">
   <uses-native-library android:name="libvndksupport.so" android:required="false"/>
   <uses-native-library android:name="libOpenCL.so" android:required="false"/>
   <activity android:name="com.dennisp.s23lab.MainActivity" android:exported="true">
