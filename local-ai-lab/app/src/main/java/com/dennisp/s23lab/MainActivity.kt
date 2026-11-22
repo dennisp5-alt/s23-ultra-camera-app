@@ -174,8 +174,8 @@ private fun LabScreen(vm: LabViewModel, save: (Uri, String) -> Unit, share: (Str
                 OutlinedButton(onClick = { vm.runBenchmark(BenchProtocol.QUICK, both) }, enabled = !busy && ui.hasModel) { Text("Quick (CPU + GPU)") }
                 Button(onClick = { vm.runBenchmark(BenchProtocol.FULL, both) }, enabled = !busy && ui.hasModel) { Text("Full protocol (CPU + GPU)") }
             }
-            Text("Full: prefill 64 / 256 / 1,024 tokens, 128 decode, 2 warm-ups + 10 measured runs each, then 2 real prompts × 5. Expect 20–40 minutes. " +
-                "Unplug the charger and start cool.", color = muted, style = MaterialTheme.typography.bodySmall)
+            Text("Full: prefill 64 / 256 / 1,024 tokens, 128 decode, 2 warm-ups (4 for the first length) + 10 measured runs each, then 2 real prompts × 5, " +
+                "all at the context chosen in 02. Expect 20–40 minutes. Unplug the charger and start cool.", color = muted, style = MaterialTheme.typography.bodySmall)
             val summaries = BenchProtocol.summarise(ui.benchRuns)
             if (summaries.isNotEmpty()) {
                 HorizontalDivider()
@@ -192,7 +192,8 @@ private fun LabScreen(vm: LabViewModel, save: (Uri, String) -> Unit, share: (Str
 
         Panel("05 / Memory") {
             Text("Measures memory by phase (idle, loaded, peak during a reply, after unload) with the backend and context chosen in 02, " +
-                "then repeats load → reply → unload to look for leaks.", color = muted, style = MaterialTheme.typography.bodySmall)
+                "then repeats load → reply → unload. A leak is memory that keeps growing per cycle; the first load leaves a one-time amount behind.",
+                color = muted, style = MaterialTheme.typography.bodySmall)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { vm.runMemoryProfile(5) }, enabled = !busy && ui.hasModel) { Text("Profile + 5 cycles") }
                 Button(onClick = { vm.runMemoryProfile(20) }, enabled = !busy && ui.hasModel) { Text("Profile + 20 cycles") }

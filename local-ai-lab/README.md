@@ -1,4 +1,4 @@
-# S23 Local AI Lab v0.4
+# S23 Local AI Lab v0.4.1
 
 Experimental Android app for private, on-device language-model tests on the Galaxy S23 Ultra, using Google LiteRT-LM (`litertlm-android` 0.19.0) on CPU and GPU. Test build only: no `INTERNET` permission, no telemetry, no external inference API.
 
@@ -10,7 +10,7 @@ v0.4 is Milestone 1 from the technical audit: a trustworthy measuring instrument
 - **Controlled benchmark.**
   - *Synthetic* runs use LiteRT-LM's own `benchmark()` with exact prefill and decode token counts and a fresh engine each run, so load time is measured too.
   - *Prompt* runs use real prompts on a loaded engine, with greedy decoding, a fixed output cap, thinking off and a fresh conversation each run.
-  - The Full protocol covers prefill 64, 256 and 1,024 tokens with 128 decode tokens, 2 warm-ups discarded and 10 measured runs each, then 2 prompts × 5.
+  - The Full protocol covers prefill 64, 256 and 1,024 tokens with 128 decode tokens, 2 warm-ups discarded (4 for the first length of each backend) and 10 measured runs each, then 2 prompts × 5. Synthetic and prompt runs use the same context size.
   - Each run records thermal status, headroom, battery temperature, charging state and battery current.
   - Results export as JSON or CSV, or share as a text summary.
 - **Model check.** Five factual questions with thinking off. It detects the thinking Qwen3 file's template problem on LiteRT-LM 0.18.0+ (replies off topic) and any thinking text.
@@ -23,7 +23,7 @@ v0.4 is Milestone 1 from the technical audit: a trustworthy measuring instrument
 - **Memory attribution.**
   - Phase snapshots: idle, after load, peak during a reply (sampled every 0.5 s), after the reply and after unload.
   - Each snapshot splits into native heap, graphics, Java heap, code and other.
-  - A load → reply → unload leak test (5 or 20 cycles) passes when memory returns within 50 MB of idle and drifts less than 5 MB per cycle.
+  - A load → reply → unload leak test (5 or 20 cycles) compares each cycle with the first after-unload reading. It passes when memory stays within 50 MB of that reading and drifts less than 5 MB per cycle. The one-time amount the first load leaves behind (native library, allocator) is reported separately.
   - The context size (`maxNumTokens`) can be chosen explicitly.
 - **Thermal gate.**
   - Android's thermal status listener and headroom forecast (polled at most every 10 s, the documented limit) replace the battery-temperature-only check.
@@ -53,3 +53,10 @@ Run with the phone unplugged, starting cool.
 - "Graphics" is the GPU memory Android attributes to the app. Some driver memory may not appear in app-level figures. Confirm with `adb shell dumpsys meminfo com.dennisp.s23lab`.
 - NPU is not enabled. Google lists the Snapdragon 8 Gen 2 (SM8550) for LiteRT NPU, but nothing has been verified on this phone.
 - CI publishes a pre-release APK on every push: `-beta` for feature branches. With the repository secrets `SIGNING_KEYSTORE_BASE64`, `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS` and `SIGNING_KEY_PASSWORD`, builds share one key and upgrade in place. Without them, uninstall the previous v0.4 build first.
+
+## v0.4.1 (after the first S23 Ultra run, 22 Nov 2026)
+
+- Synthetic runs now use the context chosen in 02. In v0.4.0 they used the model's default while prompt runs used 1280, so the two kinds of run weren't comparable. Each run records its context.
+- The first prompt length of each backend gets 2 extra warm-ups. On the S23 Ultra the first GPU loads took 17–24 s and decoded at about half speed.
+- The leak test compares cycles with the first unload, not with idle before any load. The first S23 Ultra profile (52 MB kept after the first load, then flat at +0.4 MB per cycle) now passes, as it should.
+- Summaries say how many runs were on charge.

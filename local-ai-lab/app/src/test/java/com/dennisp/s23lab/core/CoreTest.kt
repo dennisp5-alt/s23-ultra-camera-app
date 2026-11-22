@@ -85,8 +85,9 @@ class BenchProtocolTest {
         val runs = listOf(run("CPU", "prefill 256", false, 0, 10.0, error = "bad, worse"))
         val lines = BenchProtocol.toCsv(runs).trim().lines()
         assertEquals(2, lines.size)
-        assertEquals(lines[0].split(",").size, 23)
-        assertTrue(lines[1].endsWith("\"bad, worse\""))
+        assertEquals(24, lines[0].split(",").size)
+        assertEquals(24, lines[1].split(Regex(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)")).size)
+        assertTrue(lines[1].endsWith("\"bad, worse\",default"))
     }
 
     @Test fun jsonExportParses() {
@@ -96,14 +97,16 @@ class BenchProtocolTest {
         assertEquals(2, j.getJSONArray("runs").length())
         assertEquals(2, j.getJSONArray("summaries").length())
         assertEquals(2.2, j.getJSONArray("gpu_over_cpu").getJSONObject(0).getDouble("decode"), 1e-9)
-        assertTrue(BenchProtocol.summaryText(BenchProtocol.summarise(runs)).contains("[charging]"))
+        assertTrue(BenchProtocol.summaryText(BenchProtocol.summarise(runs)).contains("[charging in 1/1 runs]"))
     }
 
     @Test fun protocolsMatchMilestone() {
         assertEquals(listOf(64, 256, 1024), BenchProtocol.FULL.prefillLengths)
         assertEquals(2, BenchProtocol.FULL.warmups)
         assertEquals(10, BenchProtocol.FULL.runs)
-        assertEquals(36, BenchProtocol.FULL.syntheticRunsPerBackend)
+        assertEquals(4, BenchProtocol.FULL.warmupsFor(0))
+        assertEquals(2, BenchProtocol.FULL.warmupsFor(1))
+        assertEquals(38, BenchProtocol.FULL.syntheticRunsPerBackend)
         // 1,024 prefill + 128 decode must fit the 1,280-token Qwen3 0.6B build.
         assertTrue(BenchProtocol.FULL.prefillLengths.max() + BenchProtocol.FULL.decodeTokens <= 1280)
     }
@@ -187,12 +190,22 @@ class MemoryReportTest {
         MemoryReport.Snapshot(phase, total, 20.0, total - 60.0, 10.0, 20.0, 1.0, 5.0, 4.0, 5000.0, false)
 
     @Test fun leakVerdict() {
-        val idle = snap("idle", 200.0)
-        assertTrue(MemoryReport.leakVerdict(idle, List(20) { snap("c$it", 230.0) }).passed)
-        assertFalse(MemoryReport.leakVerdict(idle, List(20) { snap("c$it", 300.0) }).passed)
-        // Within the return margin at the end, but climbing 6 MB per cycle.
-        assertFalse(MemoryReport.leakVerdict(idle, List(8) { snap("c$it", 200.0 + it * 6.0) }).passed)
-        assertFalse(MemoryReport.leakVerdict(idle, emptyList()).passed)
+        val idle = snap("idle", 160.0)
+        val first = snap("first unload", 210.0)
+        assertTrue(MemoryReport.leakVerdict(idle, first, List(20) { snap("c$it", 220.0) }).passed)
+        assertFalse(MemoryReport.leakVerdict(idle, first, List(20) { snap("c$it", 300.0) }).passed)
+        // Within the margin at the end, but climbing 6 MB per cycle.
+        assertFalse(MemoryReport.leakVerdict(idle, first, List(8) { snap("c$it", 210.0 + it * 6.0) }).passed)
+        assertFalse(MemoryReport.leakVerdict(idle, first, emptyList()).passed)
+    }
+
+    /** The S23 Ultra GPU profile of 22 Nov 2026: a one-time 52 MB after the first load, then flat. Not a leak. */
+    @Test fun s23UltraProfileIsNotALeak() {
+        val v = MemoryReport.leakVerdict(snap("idle", 158.6), snap("after unload", 211.0),
+            listOf(216.1, 224.7, 221.0, 213.8, 223.5).mapIndexed { i, t -> snap("c$i", t) })
+        assertTrue(v.text, v.passed)
+        assertEquals(52.4, v.oneTimeMb, 0.1)
+        assertTrue(v.slopeMbPerCycle < 1.0)
     }
 
     @Test fun attributionAddsUp() {

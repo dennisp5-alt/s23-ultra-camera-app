@@ -187,14 +187,17 @@ class LabViewModel(application: Application) : AndroidViewModel(application) {
             val gpu = b == Backend.GPU
             val name = if (gpu) "GPU" else "CPU"
             // 1) Synthetic: exact token counts, fresh engine each run.
-            for (len in config.prefillLengths) {
-                for (i in 0 until config.warmups + config.runs) {
+            val ctx = ui.value.maxNumTokens
+            for ((li, len) in config.prefillLengths.withIndex()) {
+                val warmups = config.warmupsFor(li)
+                for (i in 0 until warmups + config.runs) {
                     if (stopRequested) break@backendLoop
                     val gate = device.gate()
                     if (!gate.ok) { notice(gate.reason); break@backendLoop }
-                    progress(name + " synthetic, prefill " + len + ": run " + (i + 1) + "/" + (config.warmups + config.runs) + (if (i < config.warmups) " (warm-up)" else ""))
-                    val run = measured(name, BenchProtocol.SYNTHETIC, "prefill $len", len, i < config.warmups, i) {
-                        val info = engine.syntheticBenchmark(path, gpu, len, config.decodeTokens, null)
+                    progress(name + " synthetic, prefill " + len + ": run " + (i + 1) + "/" + (warmups + config.runs) + (if (i < warmups) " (warm-up)" else ""))
+                    val run = measured(name, BenchProtocol.SYNTHETIC, "prefill $len", len, i < warmups, i, ctx) {
+                        // Same context as the prompt runs, so the two kinds are comparable.
+                        val info = engine.syntheticBenchmark(path, gpu, len, config.decodeTokens, ctx)
                         Measured(info.initTimeInSecond, info.timeToFirstTokenInSecond, info.lastPrefillTokenCount,
                             info.lastDecodeTokenCount, info.lastPrefillTokensPerSecond, info.lastDecodeTokensPerSecond, "")
                     }
@@ -206,7 +209,7 @@ class LabViewModel(application: Application) : AndroidViewModel(application) {
             }
             // 2) Real prompts on a loaded engine.
             if (config.promptRuns > 0) {
-                val state = engine.load(path, gpu, ui.value.maxNumTokens, fallbackToCpu = false)
+                val state = engine.load(path, gpu, ctx, fallbackToCpu = false)
                 if (!state.loaded) { notice(state.message); continue@backendLoop }
                 for ((label, prompt) in BenchProtocol.PROMPTS) {
                     for (i in 0 until 1 + config.promptRuns) {
@@ -214,7 +217,7 @@ class LabViewModel(application: Application) : AndroidViewModel(application) {
                         val gate = device.gate()
                         if (!gate.ok) { notice(gate.reason); break@backendLoop }
                         progress(name + " prompt '" + label + "': run " + (i + 1) + "/" + (1 + config.promptRuns) + (if (i == 0) " (warm-up)" else ""))
-                        runs += measured(name, BenchProtocol.PROMPT, label, 0, i == 0, i) {
+                        runs += measured(name, BenchProtocol.PROMPT, label, 0, i == 0, i, ctx) {
                             val r = engine.generate(prompt, LabEngine.GenOptions(system = "Answer briefly and factually.", maxOutputTokens = config.maxOutputTokens))
                             val info = r.info
                             if (r.error != null || info == null) error(r.error ?: "No benchmark info")
@@ -235,7 +238,7 @@ class LabViewModel(application: Application) : AndroidViewModel(application) {
                                 val prefillTps: Double, val decodeTps: Double, val preview: String)
 
     private suspend fun measured(backend: String, kind: String, label: String, target: Int, warmup: Boolean, index: Int,
-                                 block: suspend () -> Measured): BenchProtocol.Run {
+                                 maxNumTokens: Int?, block: suspend () -> Measured): BenchProtocol.Run {
         val thermalBefore = device.thermalStatus()
         val headroom = device.thermalHeadroom()
         val battery = device.battery()
@@ -254,6 +257,7 @@ class LabViewModel(application: Application) : AndroidViewModel(application) {
             peakGraphicsMb = peak?.graphicsMb ?: Double.NaN, thermalBefore = thermalBefore, thermalAfter = device.thermalStatus(),
             headroomBefore = headroom, batteryTempC = battery.tempC, charging = battery.charging, currentMicroA = battery.currentMicroA,
             outputPreview = m?.preview ?: "", error = result.exceptionOrNull()?.let { it.message ?: it.javaClass.simpleName },
+            maxNumTokens = maxNumTokens,
         )
     }
 
@@ -291,7 +295,8 @@ class LabViewModel(application: Application) : AndroidViewModel(application) {
         phases += snapshot("After reply, model loaded"); publish()
         engine.unload("Unloaded for the memory profile.")
         settle()
-        phases += snapshot("After unload"); publish()
+        val firstUnload = snapshot("After unload")
+        phases += firstUnload; publish()
         for (c in 1..cycles) {
             if (stopRequested) break
             if (!device.gate().ok) { notice(device.gate().reason); break }
@@ -303,7 +308,7 @@ class LabViewModel(application: Application) : AndroidViewModel(application) {
             settle()
             cycleSnaps += snapshot("Cycle $c after unload"); publish()
         }
-        _ui.update { it.copy(memoryVerdict = MemoryReport.leakVerdict(idle, cycleSnaps)) }
+        _ui.update { it.copy(memoryVerdict = MemoryReport.leakVerdict(idle, firstUnload, cycleSnaps)) }
         progress("Memory profile finished.")
     }
 

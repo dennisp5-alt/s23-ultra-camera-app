@@ -24,25 +24,38 @@ object MemoryReport {
         val unattributedMb: Double get() = totalPssMb - (javaHeapMb + nativeHeapMb + graphicsMb + codeMb + stackMb + privateOtherMb + systemMb)
     }
 
-    /** Allowed difference between idle and after-unload total PSS. */
+    /** Allowed rise from the first after-unload reading to the last cycle. */
     const val RETURN_MARGIN_MB = 50.0
 
     /** Allowed upward drift per load/unload cycle (least-squares slope). */
     const val DRIFT_PER_CYCLE_MB = 5.0
 
-    data class LeakVerdict(val passed: Boolean, val returnDeltaMb: Double, val slopeMbPerCycle: Double, val cycles: Int, val text: String)
+    data class LeakVerdict(
+        val passed: Boolean,
+        /** Memory kept after the first load and unload (native library and allocator state); reported, not judged. */
+        val oneTimeMb: Double,
+        val returnDeltaMb: Double,
+        val slopeMbPerCycle: Double,
+        val cycles: Int,
+        val text: String,
+    )
 
-    fun leakVerdict(idle: Snapshot, afterUnload: List<Snapshot>): LeakVerdict {
-        if (afterUnload.isEmpty()) return LeakVerdict(false, Double.NaN, Double.NaN, 0, "No cycles run.")
-        val delta = afterUnload.last().totalPssMb - idle.totalPssMb
-        val slope = Stats.slope(afterUnload.map { it.totalPssMb })
-        val returns = delta <= RETURN_MARGIN_MB
-        val flat = !slope.isFinite() || slope <= DRIFT_PER_CYCLE_MB
-        val passed = returns && flat
+    /**
+     * A leak is memory that keeps growing with each load/unload cycle. The first load leaves a one-time
+     * amount behind (the loaded native library, allocator caches), so cycles are compared with the first
+     * after-unload reading, not with idle before any load.
+     */
+    fun leakVerdict(idle: Snapshot, firstUnload: Snapshot, cycles: List<Snapshot>): LeakVerdict {
+        val oneTime = firstUnload.totalPssMb - idle.totalPssMb
+        if (cycles.isEmpty()) return LeakVerdict(false, oneTime, Double.NaN, Double.NaN, 0, "No cycles run.")
+        val delta = cycles.last().totalPssMb - firstUnload.totalPssMb
+        val slope = Stats.slope(cycles.map { it.totalPssMb })
+        val passed = delta <= RETURN_MARGIN_MB && (!slope.isFinite() || slope <= DRIFT_PER_CYCLE_MB)
         val text = (if (passed) "Passed: " else "Failed: ") +
-            "after ${afterUnload.size} cycles, memory is ${BenchProtocol.f0(delta)} MB above idle (limit ${RETURN_MARGIN_MB.toInt()}) " +
-            "and drifts ${BenchProtocol.f1(slope)} MB per cycle (limit ${DRIFT_PER_CYCLE_MB.toInt()})."
-        return LeakVerdict(passed, delta, slope, afterUnload.size, text)
+            "after ${cycles.size} cycles, memory is ${BenchProtocol.f0(delta)} MB above the first unload (limit ${RETURN_MARGIN_MB.toInt()}) " +
+            "and drifts ${BenchProtocol.f1(slope)} MB per cycle (limit ${DRIFT_PER_CYCLE_MB.toInt()}). " +
+            "One-time amount kept after the first load: ${BenchProtocol.f0(oneTime)} MB."
+        return LeakVerdict(passed, oneTime, delta, slope, cycles.size, text)
     }
 
     fun toJson(meta: Map<String, Any?>, phases: List<Snapshot>, cycles: List<Snapshot>, verdict: LeakVerdict?): String =
@@ -51,7 +64,7 @@ object MemoryReport {
             "phases" to phases.map(::row),
             "cycles" to cycles.map(::row),
             "leak_verdict" to verdict?.let {
-                linkedMapOf("passed" to it.passed, "return_delta_mb" to it.returnDeltaMb, "slope_mb_per_cycle" to it.slopeMbPerCycle, "cycles" to it.cycles, "text" to it.text)
+                linkedMapOf("passed" to it.passed, "one_time_mb" to it.oneTimeMb, "return_delta_mb" to it.returnDeltaMb, "slope_mb_per_cycle" to it.slopeMbPerCycle, "cycles" to it.cycles, "text" to it.text)
             },
         ))
 
