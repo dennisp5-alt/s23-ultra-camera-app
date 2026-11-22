@@ -7,7 +7,7 @@ android {
  namespace = "com.dennisp.s23lab"
  compileSdk = 36
  defaultConfig {
-  applicationId = "com.dennisp.s23lab"
+  applicationId = "com.dennisp.s23lab.v2"
   minSdk = 26
   targetSdk = 35
   versionCode = 2

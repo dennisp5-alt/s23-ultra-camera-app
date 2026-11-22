@@ -9,8 +9,8 @@ What's new:
 - Automatically routes exact validated calculations to Kotlin tools rather than the AI model.
 - Shows process PSS, available system RAM, battery percent and battery temperature. Does not claim chip temperature or app-specific power draw.
 - No INTERNET permission, analytics, model uploads, microphone or messaging access.
-- Existing model in app-private storage is preserved during an install-over update signed with the same debug key.
+- v0.2 uses a separate application ID to avoid debug-signing certificate conflicts: it installs alongside v0.1. Its private model storage is separate, so import the model once in v0.2; keep v0.1 until tested.
 
 Important: estimated tokens/s uses output characters divided by four, not tokenizer counts. CPU 12,000-call microbenchmark is separate from AI inference. GPU backend may be device/driver dependent. Snapdragon NPU is not enabled.
 
-Test: install v0.2, check imported model remains available, run same prompt in CPU and GPU, compare section 04. Try the exact prompt `15% of 240` for deterministic routing.
+Test: install v0.2 alongside v0.1, import the model from the downloaded file, run same prompt in CPU and GPU, compare section 04. Try the exact prompt `15% of 240` for deterministic routing.
