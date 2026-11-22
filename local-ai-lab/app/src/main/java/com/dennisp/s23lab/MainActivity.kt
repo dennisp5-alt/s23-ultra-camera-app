@@ -49,6 +49,42 @@ class MainActivity:ComponentActivity(){
  private var cpuPrompt=""
  private var gpuPrompt=""
  private val hardware=mutableStateOf("")
+ private val cpuBench=mutableStateListOf<BenchSample>()
+ private val gpuBench=mutableStateListOf<BenchSample>()
+ private val enduranceStatus=mutableStateOf("")
+ @Volatile private var stopAfterCurrent=false
+ private val fixedPrompt="In one sentence, explain what offline AI does on a phone."
+ private data class BenchSample(val durationMs:Long,val firstMs:Long,val length:Int,
+  val pssMiB:Int,val tempC:Double){
+  val estimate:Double get()=(length/4.0)/(durationMs.coerceAtLeast(1)/1000.0)
+ }
+ private fun median(numbers:List<Double>):Double{
+  if(numbers.isEmpty())return 0.0
+  val ordered=numbers.sorted()
+  return if(ordered.size%2==1)ordered[ordered.size/2]
+   else (ordered[ordered.size/2-1]+ordered[ordered.size/2])/2
+ }
+ private fun benchmarkSummary(runs:List<BenchSample>):String{
+  if(runs.isEmpty())return "Not measured"
+  val rate=median(runs.map{it.estimate})
+  val start=median(runs.map{it.firstMs.toDouble()})/1000.0
+  val total=median(runs.map{it.durationMs.toDouble()})/1000.0
+  return runs.size.toString()+" runs | first output "+String.format(java.util.Locale.US,"%.2f",start)+
+   " s | total "+String.format(java.util.Locale.US,"%.2f",total)+
+   " s | ~"+String.format(java.util.Locale.US,"%.1f",rate)+
+   " estimated tokens/s | peak app PSS "+runs.maxOf{it.pssMiB}+" MiB"
+ }
+ private fun batteryValues():Triple<Int,Double,Long>{
+  val b=registerReceiver(null,IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+  val level=b?.getIntExtra(BatteryManager.EXTRA_LEVEL,-1)?:-1
+  val scale=b?.getIntExtra(BatteryManager.EXTRA_SCALE,100)?:100
+  val temp=b?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE,-1)?:-1
+  val am=getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+  val memory=ActivityManager.MemoryInfo().also{am.getMemoryInfo(it)}
+  return Triple(if(level>=0&&scale>0)level*100/scale else -1,
+   if(temp>=0)temp/10.0 else -1.0,memory.availMem/1048576L)
+ }
+
  private fun deviceInfo():String {
   val am=getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
   val m=ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
@@ -83,7 +119,7 @@ class MainActivity:ComponentActivity(){
     ){
      Text("S23 / LOCAL AI LAB",color=accent)
      Text("Intelligence, on device.",color=Color.White,style=MaterialTheme.typography.headlineMedium)
-     Text("PRIVATE • OFFLINE • CPU / GPU",color=Color(0xFFAABCD0),style=MaterialTheme.typography.bodySmall)
+     Text("v0.3 • PRIVATE • OFFLINE • CPU / GPU",color=Color(0xFFAABCD0),style=MaterialTheme.typography.bodySmall)
      Card(colors=CardDefaults.cardColors(containerColor=panel)){
       Column(Modifier.fillMaxWidth().padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
        Text("01 / Reusable reasoning",style=MaterialTheme.typography.titleLarge)
@@ -123,9 +159,13 @@ class MainActivity:ComponentActivity(){
        Text("03 / Offline AI model",style=MaterialTheme.typography.titleLarge)
        Text(if(modelAvailable.value)"Model imported" else "Choose a compatible .litertlm model")
        OutlinedButton(onClick={picker.launch(arrayOf("*/*"))},enabled=!loaded.value&&!busy.value){Text("Import model")}
+       Button(onClick={loadModel(true,true)},enabled=modelAvailable.value&&!busy.value){
+        Text("Auto GPU → CPU fallback")
+       }
        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-        Button(onClick={loadModel(false)},enabled=modelAvailable.value&&!busy.value){Text("Load CPU")}
-        OutlinedButton(onClick={loadModel(true)},enabled=modelAvailable.value&&!busy.value){Text("Load GPU")}
+        OutlinedButton(onClick={loadModel(false,false)},enabled=modelAvailable.value&&!busy.value){Text("Load CPU")}
+        OutlinedButton(onClick={loadModel(true,false)},enabled=modelAvailable.value&&!busy.value){Text("Load GPU")}
+        OutlinedButton(onClick={unloadModel()},enabled=loaded.value&&!busy.value){Text("Unload")}
        }
        Text(info.value,style=MaterialTheme.typography.bodySmall)
        OutlinedTextField(value=prompt,onValueChange={prompt=it},modifier=Modifier.fillMaxWidth(),label={Text("Ask the model")},minLines=2)
@@ -143,7 +183,27 @@ class MainActivity:ComponentActivity(){
        Text("GPU",color=accent)
        Text(gpuStats.value.ifBlank{"No generation benchmark yet."})
        if(cpuRate>0 && gpuRate>0 && cpuPrompt==gpuPrompt)
-        Text("GPU / CPU estimated throughput: "+String.format(java.util.Locale.US,"%.2f",gpuRate/cpuRate)+"×",color=accent)
+        Text("Last same-prompt GPU / CPU estimated throughput: "+
+         String.format(java.util.Locale.US,"%.2f",gpuRate/cpuRate)+"×",color=accent)
+       HorizontalDivider()
+       Text("Repeated tests (fixed prompt, fresh conversation)",color=accent)
+       Button(onClick={startBench(3,false)},enabled=loaded.value&&!busy.value){
+        Text("Run 3 repeated tests")
+       }
+       OutlinedButton(onClick={startBench(20,true)},enabled=loaded.value&&!busy.value){
+        Text("2-minute endurance (max 20 replies)")
+       }
+       if(busy.value)
+        OutlinedButton(onClick={stopAfterCurrent=true}){Text("Stop after current reply")}
+       if(enduranceStatus.value.isNotBlank())Text(enduranceStatus.value,color=accent)
+       Text("Repeated CPU: "+benchmarkSummary(cpuBench))
+       Text("Repeated GPU: "+benchmarkSummary(gpuBench))
+       if(cpuBench.isNotEmpty()&&gpuBench.isNotEmpty()){
+        val cRate=median(cpuBench.map{it.estimate})
+        val gRate=median(gpuBench.map{it.estimate})
+        if(cRate>0)Text("Median GPU / CPU estimated throughput: "+
+          String.format(java.util.Locale.US,"%.2f",gRate/cRate)+"×",color=accent)
+       }
        Text("Estimated tokens/s = output characters ÷ 4 ÷ seconds. Not model tokenizer counts. First output = first nonempty chunk. For comparison, use exactly the same prompt.",
         color=Color(0xFFAABCD0),style=MaterialTheme.typography.bodySmall)
       }
@@ -155,7 +215,15 @@ class MainActivity:ComponentActivity(){
        OutlinedButton(onClick={hardware.value=deviceInfo()}){Text("Refresh")}
       }
      }
-     Text("v0.2 • No internet permission, analytics or remote code • Model answers can be inaccurate.",
+     Card(colors=CardDefaults.cardColors(containerColor=panel)){
+      Column(Modifier.fillMaxWidth().padding(16.dp),verticalArrangement=Arrangement.spacedBy(9.dp)){
+       Text("06 / Snapdragon NPU",style=MaterialTheme.typography.titleLarge)
+       Text("Not enabled: the existing Qwen model and LiteRT library are confirmed for CPU/GPU, "+
+        "but Snapdragon-specific compiled model support and NPU native libraries are not yet verified. "+
+        "No unsupported accelerator will be installed.",color=Color(0xFFAABCD0))
+      }
+     }
+     Text("v0.3 • Side-by-side install • import model again • no internet permission or telemetry.",
        color=Color(0xFFAABCD0),style=MaterialTheme.typography.bodySmall)
     }
    }
@@ -181,25 +249,124 @@ class MainActivity:ComponentActivity(){
    finally{temp.delete();busy.value=false}
   }
  }
- private fun loadModel(gpu:Boolean){
+ private fun closeModel(){
+  try{conversation?.close()}catch(_:Exception){}
+  conversation=null
+  try{engine?.close()}catch(_:Exception){}
+  engine=null
+  loaded.value=false
+  backend.value=""
+ }
+ private suspend fun initializeModel(gpu:Boolean){
+  closeModel()
+  val started=SystemClock.elapsedRealtimeNanos()
+  val candidate=Engine(EngineConfig(
+   modelPath=file.absolutePath,
+   backend=if(gpu)Backend.GPU()else Backend.CPU(),
+   cacheDir=cacheDir.path))
+  try{
+   candidate.initialize()
+   engine=candidate
+   conversation=candidate.createConversation(ConversationConfig(
+    systemInstruction=Contents.of("You are a private offline assistant. Be accurate, "+
+     "state uncertainty, and do not claim you learn during inference.")))
+   backend.value=if(gpu)"GPU" else "CPU"
+   modelLoadMs.value=(SystemClock.elapsedRealtimeNanos()-started)/1000000L
+   loaded.value=true
+   info.value="Ready on "+backend.value+" • load "+modelLoadMs.value+" ms"
+  }catch(e:Exception){
+   try{candidate.close()}catch(_:Exception){}
+   throw e
+  }
+ }
+ private fun loadModel(gpu:Boolean, auto:Boolean=false){
   if(!modelAvailable.value||busy.value)return
+  busy.value=true
+  info.value="Loading model…"
   aiScope.launch{
-   busy.value=true;loaded.value=false
-   info.value="Loading model…"
    try{
-    conversation?.close();conversation=null;engine?.close();engine=null
-    val started=SystemClock.elapsedRealtimeNanos()
-    val candidate=Engine(EngineConfig(modelPath=file.absolutePath,backend=if(gpu)Backend.GPU()else Backend.CPU(),cacheDir=cacheDir.path))
-    candidate.initialize()
-    engine=candidate
-    conversation=candidate.createConversation(ConversationConfig(systemInstruction=Contents.of("You are a careful private, offline assistant. State uncertainty.")))
-    modelLoadMs.value=(SystemClock.elapsedRealtimeNanos()-started)/1000000L
-    backend.value=if(gpu)"GPU" else "CPU"
-    loaded.value=true
-    info.value="Ready on "+backend.value+" • load "+modelLoadMs.value+" ms"
+    try{
+     initializeModel(gpu)
+    }catch(e:Exception){
+     if(!gpu||!auto)throw e
+     info.value="GPU initialization failed, testing CPU fallback…"
+     initializeModel(false)
+     info.value="Ready on CPU (automatic GPU fallback)"
+    }
     hardware.value=deviceInfo()
-   }catch(e:Exception){info.value="Load failed: "+e.message}
-   finally{busy.value=false}
+   }catch(e:Exception){
+    closeModel()
+    info.value="Load failed: "+e.message
+   }finally{busy.value=false}
+  }
+ }
+ private fun unloadModel(){
+  if(busy.value)return
+  busy.value=true
+  aiScope.launch{
+   try{
+    closeModel()
+    info.value="Model unloaded; native inference resources released."
+    hardware.value=deviceInfo()
+   }finally{busy.value=false}
+  }
+ }
+ private fun startBench(maxRuns:Int, endurance:Boolean){
+  if(!loaded.value||busy.value)return
+  busy.value=true
+  stopAfterCurrent=false
+  enduranceStatus.value="Starting repeated test on "+backend.value+"…"
+  aiScope.launch{
+   val started=SystemClock.elapsedRealtime()
+   var finished=0
+   try{
+    for(i in 0 until maxRuns){
+     if(stopAfterCurrent)break
+     val elapsed=SystemClock.elapsedRealtime()-started
+     if(endurance&&elapsed>=120000L)break
+     val (percent,temp,free)=batteryValues()
+     if((percent>=0&&percent<15)||(temp>=43.0)||(free<500L)){
+      enduranceStatus.value="Test stopped at safety limit: "+
+       "battery "+percent+"%, battery sensor "+temp+"°C, free RAM "+free+" MiB"
+      break
+     }
+     enduranceStatus.value="Running "+(i+1)+"/"+maxRuns+
+      " on "+backend.value+" • elapsed "+(elapsed/1000)+" seconds"
+     val fresh=checkNotNull(engine).createConversation(ConversationConfig(
+      systemInstruction=Contents.of("Answer in one brief factual sentence. "+
+       "Do not claim online access or self-training.")))
+     try{
+      val start=SystemClock.elapsedRealtimeNanos()
+      var first=0L
+      var chars=0
+      fresh.sendMessageAsync(fixedPrompt).collect{chunk->
+       val t=chunk.toString()
+       if(t.isNotEmpty()){
+        if(first==0L)first=SystemClock.elapsedRealtimeNanos()
+        chars+=t.length
+       }
+      }
+      val end=SystemClock.elapsedRealtimeNanos()
+      val runtime=((end-start)/1000000L).coerceAtLeast(1L)
+      val pss=Debug.MemoryInfo().also{Debug.getMemoryInfo(it)}.totalPss/1024
+      val reading=batteryValues().second
+      val sample=BenchSample(runtime,if(first>0)(first-start)/1000000L else runtime,
+       chars,pss,reading)
+      if(backend.value=="GPU")gpuBench.add(sample) else cpuBench.add(sample)
+      finished++
+      hardware.value=deviceInfo()
+     }finally{fresh.close()}
+    }
+    enduranceStatus.value="Finished "+finished+" test(s) in "+
+     String.format(java.util.Locale.US,"%.1f",(SystemClock.elapsedRealtime()-started)/1000.0)+
+     " seconds"+if(stopAfterCurrent)" (stopped by user)" else ""
+   }catch(e:Exception){
+    enduranceStatus.value="Test halted after "+finished+" runs: "+e.message
+   }finally{
+    busy.value=false
+    stopAfterCurrent=false
+    hardware.value=deviceInfo()
+   }
   }
  }
  private fun askModel(text:String){
@@ -239,8 +406,9 @@ class MainActivity:ComponentActivity(){
   }
  }
  override fun onDestroy(){
+  stopAfterCurrent=true
   aiScope.launch{
-   try{conversation?.close();engine?.close()}catch(_:Exception){}
+   closeModel()
   }.invokeOnCompletion{aiScope.cancel();executor.shutdown()}
   super.onDestroy()
  }
